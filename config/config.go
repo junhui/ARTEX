@@ -29,6 +29,56 @@ type Config struct {
 	Database      Database      `json:"database"`
 	SkillDir      string        `json:"skill_dir"`
 	InfoSecPortal InfoSecPortal `json:"infosec_portal"`
+	BrowserLogin  BrowserLogin  `json:"browser_login"`
+}
+
+// BrowserLogin configures the OPTIONAL human-in-the-loop SSO login handoff: a
+// human completes SSO (incl. MFA) in a server-side headful browser viewed over
+// noVNC, then the agent reuses the authenticated session. When Enabled is false
+// (default) the feature is entirely off — the browser_login tool is not offered
+// and no VNC/Chromium processes are expected, so ARTEX is unaffected.
+//
+// The VNC stack (Xvfb + x11vnc + noVNC) and the headful Chromium (with the CDP
+// debugging port) are started by the container/start script when enabled; ARTEX
+// only drives that Chromium over CDP. See design/sso-login.md.
+type BrowserLogin struct {
+	Enabled      bool   `json:"enabled"`        // master switch (default off)
+	NoVNCURL     string `json:"novnc_url"`      // operator-facing noVNC page URL (e.g. http://host:6080/vnc.html?autoconnect=1)
+	CDPEndpoint  string `json:"cdp_endpoint"`   // Chromium CDP endpoint ARTEX drives (default http://127.0.0.1:9222)
+	NodeHelper   string `json:"node_helper"`    // path to the CDP helper script (default skills/authenticated-session/scripts/cdp-helper.js)
+	TimeoutSec   int    `json:"timeout_sec"`    // max seconds to wait for the human (default 600)
+	StateSubpath string `json:"state_subpath"`  // storage-state filename under the task dir (default auth-state.json)
+}
+
+// BrowserLoginConfig resolves the browser-login config with environment overrides:
+//
+//	env ARTEX_BROWSER_LOGIN=1          force-enables the feature
+//	env ARTEX_BROWSER_LOGIN_NOVNC_URL  overrides the operator-facing noVNC URL
+//	env ARTEX_BROWSER_LOGIN_CDP        overrides the CDP endpoint
+func BrowserLoginConfig() BrowserLogin {
+	b := Load().BrowserLogin
+	if v := strings.TrimSpace(os.Getenv("ARTEX_BROWSER_LOGIN")); v == "1" || strings.EqualFold(v, "true") {
+		b.Enabled = true
+	}
+	if v := strings.TrimSpace(os.Getenv("ARTEX_BROWSER_LOGIN_NOVNC_URL")); v != "" {
+		b.NoVNCURL = v
+	}
+	if v := strings.TrimSpace(os.Getenv("ARTEX_BROWSER_LOGIN_CDP")); v != "" {
+		b.CDPEndpoint = v
+	}
+	if strings.TrimSpace(b.CDPEndpoint) == "" {
+		b.CDPEndpoint = "http://127.0.0.1:9222"
+	}
+	if strings.TrimSpace(b.NoVNCURL) == "" {
+		b.NoVNCURL = "/novnc/vnc.html?autoconnect=1&resize=remote"
+	}
+	if b.TimeoutSec <= 0 {
+		b.TimeoutSec = 600
+	}
+	if strings.TrimSpace(b.StateSubpath) == "" {
+		b.StateSubpath = "auth-state.json"
+	}
+	return b
 }
 
 // InfoSecPortalTool is one HTTP-backed tool the InfoSec Portal exposes to agents

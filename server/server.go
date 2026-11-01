@@ -66,6 +66,10 @@ type Server struct {
 	// immediately, so a page reload / proxy timeout can't abort a live run. This
 	// map serializes turns per task — one main-agent run at a time per task, so
 	// concurrent messages don't corrupt the shared exp<id>-main transcript.
+	// browser-login (SSO 登录接管) pending-handoff manager; lazily initialized.
+	blOnce sync.Once
+	blMgr  *browserLoginManager
+
 	chatMu   sync.Mutex
 	chatBusy map[string]bool
 	// chatCancel holds the cancel func for each in-flight conversation run (keyed by
@@ -224,6 +228,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		s.seedOrchestrationTools()  // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
 		s.seedInfoSecPortalTools() // InfoSec Portal 工具 seed(可选；未配置则 no-op)
 		s.seedBuiltinScenarios()   // 预制测试场景 seed 进任务模板(幂等)
+		s.seedBrowserLoginTool()   // SSO 登录接管工具 seed(仅开启时；未开启 no-op)
 		if err := s.seedFindingRetester(); err != nil {
 			log.Printf("[retester] seed: %v", err)
 		}
@@ -882,6 +887,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/inventory/sync", s.inventorySync)
 	mux.HandleFunc("GET /api/scenarios", s.listScenarios)
 	mux.HandleFunc("POST /api/scenarios/launch", s.launchScenario)
+
+	// SSO 登录接管(方案 工作流 B)
+	mux.HandleFunc("GET /api/browser-login/pending", s.browserLoginPending)
+	mux.HandleFunc("POST /api/browser-login/{id}/done", s.browserLoginDone)
+	mux.HandleFunc("POST /api/browser-login/{id}/cancel", s.browserLoginCancel)
 	// Skill CRUD (文件系统)
 	mux.HandleFunc("GET /api/skills", s.fsListSkills)
 	mux.HandleFunc("POST /api/skills", s.fsCreateSkill)

@@ -21,6 +21,16 @@
   "_comment_skill_dir": "skill 根目录（每个子目录一个 skill，含 SKILL.md）。优先级：环境变量 ARTEX_SKILL_DIR > 本字段 > 默认（可执行文件同级的 skills/）。留空或删除本字段即用默认。相对路径相对当前工作目录解析。",
   "skill_dir": "/opt/artex/skills",
 
+  "_comment_browser_login": "可选：SSO 登录接管(人工在服务端有头浏览器里经 noVNC 完成 SSO/MFA 登录,Agent 随后复用已认证会话继续测试)。enabled 默认 false=功能关闭,不提供 browser_login 工具、不期望任何浏览器/VNC 进程,ARTEX 不受影响。开启需：(1)容器以 ARTEX_BROWSER_LOGIN=1 启动(start.sh 会拉起 scripts/browser-session.sh:Xvfb+x11vnc+noVNC+有头 Chromium@CDP);(2)novnc_url 填成运维可访问的 noVNC 页面地址(默认暴露在容器 6080 端口,如 http://<host>:6080/vnc.html?autoconnect=1&resize=remote);cdp_endpoint 为 Chromium CDP 地址(默认 http://127.0.0.1:9222)。⚠️ 该 VNC/浏览器基础设施需在真实部署环境验证。",
+  "_example_browser_login": {
+    "browser_login": {
+      "enabled": false,
+      "novnc_url": "http://<host>:6080/vnc.html?autoconnect=1&resize=remote",
+      "cdp_endpoint": "http://127.0.0.1:9222",
+      "timeout_sec": 600
+    }
+  },
+
   "_comment_infosec_portal": "可选：内部 InfoSec Portal 工具集成。整段省略 = 功能关闭，不注册任何工具、不影响使用。base_url 为内部 Portal 地址；headers 放鉴权等每次调用都带的静态头（token 建议改用环境变量 ARTEX_INFOSEC_PORTAL_TOKEN 注入 Authorization: Bearer，避免写进文件；base_url 也可用 ARTEX_INFOSEC_PORTAL_BASE_URL 覆盖）。tools[] 每项即一个 Agent 可调用的查询工具：path/query/headers/body 里可用 {参数名} 占位，运行时用工具入参填充；schema 为该工具入参的 JSON Schema。agents 为默认绑定（省略则 planner/worker/auto）。insecure=true 跳过 TLS 校验（内网自签证书）。工具 seed 进工具表后可在界面里按 agent 调整绑定。",
   "_example_infosec_portal": {
     "infosec_portal": {

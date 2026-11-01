@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
+	"github.com/Autumn-27/artex/config"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
@@ -42,6 +43,9 @@ func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
 	tools = append(tools, s.findingRetestTools()...)
 	tools = append(tools, s.platformTools()...)       // 平台操作工具(建改 skill/工具/MCP，给 Auto 用)
 	tools = append(tools, s.infosecPortalTools()...) // InfoSec Portal 工具(可选，未配置则为空)
+	if config.BrowserLoginConfig().Enabled {
+		tools = append(tools, s.browserLoginTool()) // SSO 登录接管工具(可选，未开启则为空)
+	}
 	custom, err := s.customTools()
 	if err != nil {
 		log.Printf("[custom-tool] 加载失败: %v", err)

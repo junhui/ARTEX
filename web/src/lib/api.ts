@@ -1160,6 +1160,17 @@ export const api = {
     llm_profile_ids?: number[];
   }) => post<Task>("/scenarios/launch", body),
 
+  // ---- SSO 登录接管(方案 工作流 B) ----
+  browserLoginPending: () =>
+    get<{
+      enabled: boolean;
+      pending:
+        | { task_id: string; login_url: string; novnc_url: string; created_at: string }[]
+        | null;
+    }>("/browser-login/pending").then((r) => ({ enabled: r.enabled, pending: arr(r.pending) })),
+  browserLoginDone: (taskId: string) => post<{ ok: boolean }>(`/browser-login/${taskId}/done`),
+  browserLoginCancel: (taskId: string) => post<{ ok: boolean }>(`/browser-login/${taskId}/cancel`),
+
   // ---- skills (文件系统) ----
   skills: () => get<{ skills: SkillItem[] }>("/skills").then((r) => arr(r.skills)),
   createSkill: (s: {

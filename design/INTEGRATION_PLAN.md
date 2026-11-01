@@ -96,6 +96,15 @@ Broken Authentication · Broken Authorization · Injection · XSS · SSRF。
 ### B3. 交付物
 `authenticated-session` skill、任务暂停/恢复的登录接管状态与 API、前端接管入口、会话复用与过期重登流程、测试。
 
+### B 实现状态 ✅（基础设施需真机验证）
+采用 **noVNC + 有头 Chromium**。详见 `design/sso-login.md`。
+- 后端：`server/browser_login.go`（阻塞式 `browser_login` 工具 + 待处理接管管理 + API），
+  config `browser_login`（含环境变量覆盖），单元测试通过。
+- 基础设施：`scripts/browser-session.sh`（Xvfb+x11vnc+noVNC+有头 Chromium@CDP）、`start.sh` 钩子、
+  `Dockerfile`（装 VNC 栈 + chromium、暴露 6080）、CDP 助手 `cdp-helper.js`。
+- 技能：`skills/authenticated-session/`。前端：全局登录接管面板(noVNC iframe + “我已登录完成”)。
+- **可选**：`enabled=false`（默认）零影响。**⚠️ VNC/浏览器运行时需在真实部署验证**（沙箱无显示设备）。
+
 ---
 
 ## 工作流 C：InfoSec Portal 工具整合（弱耦合）

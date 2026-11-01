@@ -42,6 +42,12 @@ forward() {
 }
 trap forward INT TERM
 
+# 可选:SSO 登录接管所需的服务端有头浏览器 + noVNC(方案 工作流 B)。
+# 仅 ARTEX_BROWSER_LOGIN=1 时启动;脚本自身缺依赖会安静跳过,不影响 artex。
+if [ "${ARTEX_BROWSER_LOGIN:-0}" = "1" ] && [ -x ./scripts/browser-session.sh ]; then
+	./scripts/browser-session.sh || true
+fi
+
 delay=1
 while :; do
 	"$BIN" "$@" &
