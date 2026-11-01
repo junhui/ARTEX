@@ -28,8 +28,55 @@ type Database struct {
 type Config struct {
 	Database      Database      `json:"database"`
 	SkillDir      string        `json:"skill_dir"`
-	InfoSecPortal InfoSecPortal `json:"infosec_portal"`
-	BrowserLogin  BrowserLogin  `json:"browser_login"`
+	InfoSecPortal InfoSecPortal  `json:"infosec_portal"`
+	BrowserLogin  BrowserLogin   `json:"browser_login"`
+	AuthProfiles  []AuthProfile  `json:"auth_profiles"`
+}
+
+// AuthStep is one step of an automated login flow.
+type AuthStep struct {
+	Action   string `json:"action"`   // goto | fill | click | press | wait
+	Selector string `json:"selector"` // CSS selector (fill/click)
+	Value    string `json:"value"`    // fill text / key / url / ms; supports $username $password $totp
+}
+
+// AuthProfile is an OPTIONAL automated credentialed login flow for non-interactive
+// (e.g. CI) runs — the counterpart to the human-in-the-loop browser_login. When no
+// profiles are configured, the auto_login tool is not offered. Credentials may be
+// given as ${ENV_VAR} so secrets stay out of the file.
+type AuthProfile struct {
+	Name               string     `json:"name"`
+	Match              string     `json:"match"`       // substring matched against the target host/URL to pick this profile
+	LoginType          string     `json:"login_type"`  // "form" (default)
+	LoginURL           string     `json:"login_url"`
+	Username           string     `json:"username"`    // supports ${ENV}
+	Password           string     `json:"password"`    // supports ${ENV}
+	TOTPSecret         string     `json:"totp_secret"` // base32 secret for $totp; supports ${ENV}
+	Steps              []AuthStep `json:"steps"`
+	SuccessURLContains string     `json:"success_url_contains"`
+	SuccessSelector    string     `json:"success_selector"`
+}
+
+// expandEnv replaces a whole-string ${VAR} reference with the env var's value.
+// A plain value (no ${...}) is returned unchanged.
+func expandEnv(v string) string {
+	v = strings.TrimSpace(v)
+	if strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}") {
+		return os.Getenv(v[2 : len(v)-1])
+	}
+	return v
+}
+
+// AuthProfilesConfig returns the configured login profiles with ${ENV} credentials
+// expanded. Empty when the feature is not configured.
+func AuthProfilesConfig() []AuthProfile {
+	ps := Load().AuthProfiles
+	for i := range ps {
+		ps[i].Username = expandEnv(ps[i].Username)
+		ps[i].Password = expandEnv(ps[i].Password)
+		ps[i].TOTPSecret = expandEnv(ps[i].TOTPSecret)
+	}
+	return ps
 }
 
 // BrowserLogin configures the OPTIONAL human-in-the-loop SSO login handoff: a

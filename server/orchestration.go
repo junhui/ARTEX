@@ -46,6 +46,9 @@ func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
 	if config.BrowserLoginConfig().Enabled {
 		tools = append(tools, s.browserLoginTool()) // SSO 登录接管工具(可选，未开启则为空)
 	}
+	if len(config.AuthProfilesConfig()) > 0 {
+		tools = append(tools, s.autoLoginTool()) // 自动化凭据登录(可选，未配置则为空)
+	}
 	custom, err := s.customTools()
 	if err != nil {
 		log.Printf("[custom-tool] 加载失败: %v", err)

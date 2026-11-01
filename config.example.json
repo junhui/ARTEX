@@ -31,6 +31,30 @@
     }
   },
 
+  "_comment_auth_profiles": "可选：自动化凭据登录(无人值守/CI 用，与 browser_login 人工接管互补)。整段省略=不提供 auto_login 工具。每个档案按 match(目标 host/URL 子串)匹配;steps 为表单登录步骤(action: goto|fill|click|press|wait),value 里 $username/$password/$totp 会被替换($totp 由 totp_secret 的 base32 密钥算出)。凭据建议用 ${ENV_VAR} 从环境变量注入,避免明文落盘。success_url_contains / success_selector 用于校验登录成功。",
+  "_example_auth_profiles": {
+    "auth_profiles": [
+      {
+        "name": "corp-portal",
+        "match": "portal.corp.example.com",
+        "login_type": "form",
+        "login_url": "https://portal.corp.example.com/login",
+        "username": "${PORTAL_USER}",
+        "password": "${PORTAL_PASS}",
+        "totp_secret": "${PORTAL_TOTP}",
+        "steps": [
+          { "action": "fill", "selector": "#username", "value": "$username" },
+          { "action": "fill", "selector": "#password", "value": "$password" },
+          { "action": "click", "selector": "button[type=submit]" },
+          { "action": "wait", "value": "1500" },
+          { "action": "fill", "selector": "#otp", "value": "$totp" },
+          { "action": "click", "selector": "button[type=submit]" }
+        ],
+        "success_url_contains": "/dashboard"
+      }
+    ]
+  },
+
   "_comment_infosec_portal": "可选：内部 InfoSec Portal 工具集成。整段省略 = 功能关闭，不注册任何工具、不影响使用。base_url 为内部 Portal 地址；headers 放鉴权等每次调用都带的静态头（token 建议改用环境变量 ARTEX_INFOSEC_PORTAL_TOKEN 注入 Authorization: Bearer，避免写进文件；base_url 也可用 ARTEX_INFOSEC_PORTAL_BASE_URL 覆盖）。tools[] 每项即一个 Agent 可调用的查询工具：path/query/headers/body 里可用 {参数名} 占位，运行时用工具入参填充；schema 为该工具入参的 JSON Schema。agents 为默认绑定（省略则 planner/worker/auto）。insecure=true 跳过 TLS 校验（内网自签证书）。工具 seed 进工具表后可在界面里按 agent 调整绑定。",
   "_example_infosec_portal": {
     "infosec_portal": {

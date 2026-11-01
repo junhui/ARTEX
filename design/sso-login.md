@@ -1,3 +1,19 @@
+# 登录接管（工作流 B）+ 自动化凭据登录
+
+> 两种互补方式:**人工接管**(`browser_login`,见下,适合 SSO/MFA 推送/验证码)与
+> **自动化凭据登录**(`auto_login`,适合无人值守/CI)。
+
+## 自动化凭据登录(auto_login)
+
+- 配置 `config.auth_profiles`(可选;见 `config.example.json` 的 `_example_auth_profiles`):
+  按 `match` 匹配目标,`steps` 描述表单登录流程,`value` 里 `$username/$password/$totp` 自动替换,
+  `$totp` 由 `totp_secret`(base32)算出(RFC 6238);凭据可用 `${ENV}` 注入避免明文。
+- 工具 `auto_login{target}`:无头 playwright 执行登录(`skills/authenticated-session/scripts/auto-login.js`),
+  校验成功后把 storageState 存到任务目录,返回路径供 `playwright-cli state-load` 复用。
+- 未配置任何档案时不提供该工具,零影响。不依赖 B 的 VNC 栈。
+
+---
+
 # SSO 登录接管（工作流 B）
 
 让需要 **SSO 登录**（可能含 MFA）的内部系统也能被测试：人工在**服务端有头浏览器**里经 noVNC 完成登录，

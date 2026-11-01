@@ -229,6 +229,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		s.seedInfoSecPortalTools() // InfoSec Portal 工具 seed(可选；未配置则 no-op)
 		s.seedBuiltinScenarios()   // 预制测试场景 seed 进任务模板(幂等)
 		s.seedBrowserLoginTool()   // SSO 登录接管工具 seed(仅开启时；未开启 no-op)
+		s.seedAutoLoginTool()      // 自动化凭据登录工具 seed(仅配置了档案时)
 		if err := s.seedFindingRetester(); err != nil {
 			log.Printf("[retester] seed: %v", err)
 		}
