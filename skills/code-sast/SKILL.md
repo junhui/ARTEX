@@ -30,14 +30,43 @@ description: 白盒源码安全分析。有目标源码时用它:做威胁建模
 7. **去重(dedupe)**:同一根因的多个表现合并为一个。
 8. **批判 + 复核(critic/review)**:自我反驳——这个数据流真的可被外部触发吗?清洗真的无效吗?把站不住的降级或丢弃。
 
+## 持久化知识库(KB)
+
+把白盒分析沉淀为**任务工作目录下可累积的知识库**(`sast-kb/`),让各阶段/各类别共享、避免重复、
+并作为报告与去重的依据。建议结构:
+
+```
+sast-kb/
+  index.md               # 总览:系统是什么、技术栈、入口清单、已覆盖/待覆盖、指向下面各文件
+  THREAT_MODEL.md        # 威胁建模:攻击者、资产、信任边界、高风险接口、可信输入
+  entities/<name>.md     # 关键组件/模块画像(职责、入口、依赖、数据流)
+  vulnerabilities/<class>.md  # 按类别累积的可疑点与结论(injection/xss/authz/auth/ssrf)
+  exploit-tasks.md       # 结构化"利用任务"清单(见下)
+```
+
+边分析边写、边更新 `index.md` 的覆盖进度(哪些目录/入口已过、还剩哪些),这样续作或他人接手时不丢上下文。
+
+## 任务形成(task-formation)
+
+把确认的可疑点转成**结构化利用任务**,写进 `sast-kb/exploit-tasks.md`,交给运行时按类别验证。每条含:
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 任务编号(如 INJ-01) |
+| `class` | injection / xss / authz / auth / ssrf / other |
+| `entry` | 网络可达入口(URL / 接口 / 参数) |
+| `source→sink` | 代码轨迹(文件:行) |
+| `hypothesis` | 攻击路径假设 |
+| `poc_idea` | 最小 PoC 设想(运行时怎么触发) |
+| `status` | `open` / `confirmed`(已出 PoC) / `blocked`(需带外等) / `false_positive` |
+| `severity` | 仅 confirmed 时填(四问定级) |
+
+利用阶段(`web-injection` 等)按此清单逐条验证,并回填 `status`/`severity`。
+
 ## 产出(交给利用阶段)
 
-每个可疑点记录:
-- **类别**(注入/XSS/越权/认证/SSRF/其他)→ 转给对应 skill(`web-injection` 等)验证;
-- **位置**:文件:行(source 与 sink 各一);
-- **轨迹**:输入来源 → 经过 → 危险 sink + 缺失/无效的防御;
-- **攻击路径假设** + **最小 PoC 设想**(运行时怎么触发);
-- **可达性**:对应的网络可达入口(URL/接口/参数)。
+每条利用任务即上表一行,核心是:**类别** → 对应 skill 验证;**位置**(source/sink 文件:行);
+**轨迹**(输入→经过→危险 sink + 缺失防御);**攻击路径假设 + 最小 PoC 设想**;**可达入口**。
 
 ## 边界
 
