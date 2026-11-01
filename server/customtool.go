@@ -231,6 +231,7 @@ type httpExec struct {
 	TimeoutMs         int               `json:"timeout_ms"`
 	Proxy             string            `json:"proxy"`
 	UseRecordingProxy bool              `json:"use_recording_proxy"`
+	Insecure          bool              `json:"insecure"` // skip TLS verification (internal self-signed certs)
 }
 
 func timeoutOr(ms, def int) time.Duration {
@@ -467,22 +468,28 @@ func (s *Server) httpProxyTransport(spec httpExec) *http.Transport {
 			caFile = s.m.ProxyCACert()
 		}
 	}
-	if proxyStr == "" {
-		return nil
+	if proxyStr == "" && !spec.Insecure && caFile == "" {
+		return nil // direct, default TLS → no custom transport needed
 	}
-	pu, err := url.Parse(proxyStr)
-	if err != nil {
-		return nil
+	tr := &http.Transport{}
+	if proxyStr != "" {
+		if pu, err := url.Parse(proxyStr); err == nil {
+			tr.Proxy = http.ProxyURL(pu)
+		}
 	}
-	tr := &http.Transport{Proxy: http.ProxyURL(pu)}
+	tlsc := &tls.Config{}
+	if spec.Insecure {
+		tlsc.InsecureSkipVerify = true // internal self-signed certs
+	}
 	if caFile != "" {
 		if pem, err := os.ReadFile(caFile); err == nil {
 			pool := x509.NewCertPool()
 			if pool.AppendCertsFromPEM(pem) {
-				tr.TLSClientConfig = &tls.Config{RootCAs: pool}
+				tlsc.RootCAs = pool
 			}
 		}
 	}
+	tr.TLSClientConfig = tlsc
 	return tr
 }
 

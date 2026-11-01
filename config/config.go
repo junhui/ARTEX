@@ -26,8 +26,63 @@ type Database struct {
 
 // Config is the on-disk config file shape.
 type Config struct {
-	Database Database `json:"database"`
-	SkillDir string   `json:"skill_dir"`
+	Database      Database      `json:"database"`
+	SkillDir      string        `json:"skill_dir"`
+	InfoSecPortal InfoSecPortal `json:"infosec_portal"`
+}
+
+// InfoSecPortalTool is one HTTP-backed tool the InfoSec Portal exposes to agents
+// (e.g. "look up an IP", "look up an asset"). Each becomes a callable agent tool
+// that issues one HTTP request to the portal. Path/Query/Headers/Body may embed
+// {param} placeholders that are filled from the tool call's arguments at runtime.
+type InfoSecPortalTool struct {
+	Key         string            `json:"key"`         // tool name (lowercase, [a-z0-9_]); must be unique
+	Description string            `json:"description"` // shown to the model: what it does + when to use it
+	Method      string            `json:"method"`      // HTTP method (default GET)
+	Path        string            `json:"path"`        // appended to base_url; may contain {param}
+	Query       map[string]string `json:"query"`       // query params; values may contain {param}
+	Headers     map[string]string `json:"headers"`     // per-tool headers; values may contain {param}
+	Body        string            `json:"body"`        // request body; may contain {param}
+	Schema      json.RawMessage   `json:"schema"`      // JSON Schema for the tool's arguments
+	Agents      []string          `json:"agents"`      // per-tool binding override (falls back to portal-level agents)
+	Enabled     *bool             `json:"enabled"`     // nil/true = on; false = skip this tool
+}
+
+// InfoSecPortal is the OPTIONAL internal InfoSec Portal integration. It is purely
+// additive: when base_url is empty (the section omitted), NO portal tools are
+// registered and ARTEX behaves exactly as if the feature did not exist — the only
+// effect of leaving it unconfigured is that those lookup tools are unavailable.
+// ARTEX stays an independent project; the portal is referenced over plain HTTP.
+type InfoSecPortal struct {
+	BaseURL           string              `json:"base_url"`            // e.g. https://infosec.internal (empty = feature off)
+	Headers           map[string]string   `json:"headers"`             // static headers on every call (e.g. auth)
+	Insecure          bool                `json:"insecure"`            // skip TLS verification (self-signed internal certs)
+	Proxy             string              `json:"proxy"`               // optional egress proxy for portal calls
+	UseRecordingProxy bool                `json:"use_recording_proxy"` // route through ARTEX's recording proxy (default false)
+	TimeoutMs         int                 `json:"timeout_ms"`          // per-call timeout (default 30000)
+	Agents            []string            `json:"agents"`              // default agent binding for all tools (fallback: worker/planner/auto)
+	Tools             []InfoSecPortalTool `json:"tools"`               // the tools to expose
+}
+
+// InfoSecPortalConfig resolves the portal config with environment overrides, so
+// secrets (tokens) and the base URL can be injected without editing the file:
+//
+//	env ARTEX_INFOSEC_PORTAL_BASE_URL  overrides base_url
+//	env ARTEX_INFOSEC_PORTAL_TOKEN     sets the "Authorization: Bearer <token>" header
+//
+// A missing config file or absent section yields a zero value (feature off).
+func InfoSecPortalConfig() InfoSecPortal {
+	p := Load().InfoSecPortal
+	if v := strings.TrimSpace(os.Getenv("ARTEX_INFOSEC_PORTAL_BASE_URL")); v != "" {
+		p.BaseURL = v
+	}
+	if tok := strings.TrimSpace(os.Getenv("ARTEX_INFOSEC_PORTAL_TOKEN")); tok != "" {
+		if p.Headers == nil {
+			p.Headers = map[string]string{}
+		}
+		p.Headers["Authorization"] = "Bearer " + tok
+	}
+	return p
 }
 
 // BaseDir is the directory that anchors all runtime artifacts (config.json and
