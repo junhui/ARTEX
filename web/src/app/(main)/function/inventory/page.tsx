@@ -19,10 +19,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
-import type { InventoryDomain, TaskTemplate } from "@/lib/types";
+import type { InventoryDomain, ScenarioConstraint, TaskTemplate } from "@/lib/types";
 
 // 域名清单(InfoSec Portal)+ 场景化发起测试(方案 工作流 C 第二阶段)。
 // 未配置真实 Portal 清单接口时,后端回落到内置 mock 数据,功能即刻可用。
@@ -160,6 +161,9 @@ export default function InventoryPage() {
 
 function LaunchDialog({ domain, onClose }: { domain: InventoryDomain | null; onClose: () => void }) {
   const [scenarios, setScenarios] = React.useState<TaskTemplate[]>([]);
+  const [constraints, setConstraints] = React.useState<ScenarioConstraint[]>([]);
+  const [constraint, setConstraint] = React.useState<string>("");
+  const [profile, setProfile] = React.useState(true);
   const [selected, setSelected] = React.useState<Set<number>>(new Set());
   const [extra, setExtra] = React.useState("");
   const [name, setName] = React.useState("");
@@ -172,9 +176,14 @@ function LaunchDialog({ domain, onClose }: { domain: InventoryDomain | null; onC
     setSelected(new Set());
     setExtra("");
     setName("");
+    setProfile(true);
     api
       .scenarios()
-      .then(setScenarios)
+      .then((r) => {
+        setScenarios(r.scenarios);
+        setConstraints(r.constraints);
+        setConstraint(r.defaultConstraint);
+      })
       .catch((e) => toast.error(`加载场景失败：${(e as Error).message}`));
   }, [open]);
 
@@ -198,6 +207,8 @@ function LaunchDialog({ domain, onClose }: { domain: InventoryDomain | null; onC
       const task = await api.launchScenario({
         target: domain.domain,
         scenario_ids: [...selected],
+        constraint,
+        profile,
         extra: extra.trim(),
         name: name.trim(),
       });
@@ -244,6 +255,39 @@ function LaunchDialog({ domain, onClose }: { domain: InventoryDomain | null; onC
               )}
             </div>
           </div>
+
+          <div className="space-y-2">
+            <Label>约束等级（ROE）</Label>
+            <Select value={constraint} onValueChange={setConstraint}>
+              <SelectTrigger>
+                <SelectValue placeholder="选择约束等级" />
+              </SelectTrigger>
+              <SelectContent>
+                {constraints.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {constraints.find((c) => c.id === constraint)?.desc ? (
+              <p className="text-muted-foreground text-xs">{constraints.find((c) => c.id === constraint)?.desc}</p>
+            ) : null}
+          </div>
+
+          <button
+            type="button"
+            className="flex w-full cursor-pointer items-start gap-2 text-left"
+            onClick={() => setProfile((v) => !v)}
+          >
+            <Checkbox checked={profile} className="pointer-events-none mt-0.5" tabIndex={-1} />
+            <span className="leading-tight">
+              <span className="font-medium text-sm">测试时顺带采集域名画像</span>
+              <span className="block text-muted-foreground text-xs">
+                记录这个域名是做什么的、是否 SSO、能看到什么数据，并对关键页面截图
+              </span>
+            </span>
+          </button>
 
           <div className="space-y-2">
             <Label htmlFor="scenario-extra">补充说明（可选）</Label>

@@ -75,6 +75,7 @@ import type {
   SessionTokenUsage,
   Settings,
   Severity,
+  ScenarioConstraint,
   SkillCall,
   SkillItem,
   SSProject,
@@ -1149,10 +1150,19 @@ export const api = {
       "/inventory/sync",
       body,
     ),
-  scenarios: () => get<{ scenarios: TaskTemplate[] }>("/scenarios").then((r) => arr(r.scenarios)),
+  scenarios: () =>
+    get<{ scenarios: TaskTemplate[]; constraints: ScenarioConstraint[]; default_constraint: string }>(
+      "/scenarios",
+    ).then((r) => ({
+      scenarios: arr(r.scenarios),
+      constraints: arr(r.constraints),
+      defaultConstraint: r.default_constraint,
+    })),
   launchScenario: (body: {
     target: string;
     scenario_ids: number[];
+    constraint?: string;
+    profile?: boolean;
     extra?: string;
     name?: string;
     category_id?: number | null;

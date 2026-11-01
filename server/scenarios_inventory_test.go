@@ -61,9 +61,10 @@ func TestComposeScenarioGoal(t *testing.T) {
 			{Action: "block", Kind: "host", Pattern: "169.254.169.254"},
 		}},
 	}
-	goal, rules := composeScenarioGoal("shop.example.com", "focus on checkout", tmpls)
+	c := constraintByID("safe_validate")
+	goal, rules := composeScenarioGoal("shop.example.com", "focus on checkout", tmpls, c, true)
 
-	for _, want := range []string{"测试目标：shop.example.com", "## 场景：Web 常规", "do web testing", "## 场景：SSRF", "## 额外说明", "focus on checkout"} {
+	for _, want := range []string{"强约束", "严格不改数据", "测试目标：shop.example.com", "域名画像采集", "## 场景：Web 常规", "do web testing", "## 场景：SSRF", "## 额外说明", "focus on checkout"} {
 		if !strings.Contains(goal, want) {
 			t.Errorf("goal missing %q\n---\n%s", want, goal)
 		}
@@ -73,12 +74,27 @@ func TestComposeScenarioGoal(t *testing.T) {
 	}
 }
 
-func TestComposeScenarioGoal_ExtraOnly(t *testing.T) {
-	goal, rules := composeScenarioGoal("api.example.com", "just poke the login", nil)
+func TestComposeScenarioGoal_ExtraOnly_NoProfile(t *testing.T) {
+	goal, rules := composeScenarioGoal("api.example.com", "just poke the login", nil, nil, false)
 	if !strings.Contains(goal, "测试目标：api.example.com") || !strings.Contains(goal, "just poke the login") {
 		t.Fatalf("extra-only goal wrong: %s", goal)
 	}
+	if strings.Contains(goal, "域名画像采集") {
+		t.Fatalf("profile should be off: %s", goal)
+	}
 	if rules != nil {
 		t.Fatalf("expected no rules, got %+v", rules)
+	}
+}
+
+func TestConstraintByID(t *testing.T) {
+	if constraintByID("") == nil || constraintByID("").ID != "safe_validate" {
+		t.Fatal("empty should default to safe_validate")
+	}
+	if constraintByID("intrusive") == nil {
+		t.Fatal("intrusive should resolve")
+	}
+	if constraintByID("nope") != nil {
+		t.Fatal("unknown should be nil")
 	}
 }
