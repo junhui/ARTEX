@@ -325,6 +325,14 @@ var builtinSkillVisibility = map[string][]string{
 	"api-recon":             {"auto", "pentest", "worker"},
 	"domain-profile":        {"auto", "pentest", "worker"},
 	"authenticated-session": {"auto", "pentest", "worker"},
+	// 白盒 + Web/API 测试(方案 工作流 A)
+	"web-app-pentest": {"auto", "pentest", "worker"},
+	"code-sast":       {"auto", "pentest", "worker"},
+	"web-injection":   {"auto", "pentest", "worker"},
+	"web-xss":         {"auto", "pentest", "worker"},
+	"web-authz":       {"auto", "pentest", "worker"},
+	"web-auth":        {"auto", "pentest", "worker"},
+	"web-ssrf":        {"auto", "pentest", "worker"},
 }
 
 // seedBuiltinSkillVisibility binds the shipped built-in skills to their default

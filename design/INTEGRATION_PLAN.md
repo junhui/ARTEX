@@ -73,6 +73,18 @@ Broken Authentication · Broken Authorization · Injection · XSS · SSRF。
 ### A5. 交付物
 新增 skills 目录若干、`source_attach`/`code_*` 工具、planner 阶段引导更新、报告模板增强、以及各 skill 的单元/集成测试与一个样例靶场跑通记录。
 
+### A 实现状态 ✅（原生 skills 重写）
+把 Shannon 方法论原生改写为 ARTEX skills(原创措辞,移植其结构与严谨度):
+- `web-app-pentest`:总纲——阶段流程(侦察/画像 → 判断白盒/黑盒 → 按类别检测 → 利用验证出 PoC → 报告)、
+  证据即报告、代码为基准、只走带内、遵守 ROE 强约束;`references/methodology.md` 收录严重度四问+下限、报告规范、利用边界、白盒要点。
+- `code-sast`:白盒源码分析(校准→威胁建模→作用域路由→source→sink 研究→初筛→确认→去重→批判/复核),
+  获取源码(git 只读克隆)、产出"可疑点+代码位置+攻击路径假设"交给运行时验证。
+- 五类:`web-injection` / `web-xss` / `web-authz` / `web-auth` / `web-ssrf`——各含白盒信号(source/sink)、
+  黑盒检测、按 ROE 的利用验证、类别严重度要点、边界。
+- 技能可见性(worker/auto/pentest)已注册;内置场景 goal 引用这些 skill。
+- **源码接入**:采用 skill 内 `git clone` 只读 + 现有 Bash/grep/read 能力(未新增专用 Go 工具,保持原生 skills 路线)。
+- **仍可增强(后续)**:报告模板按类别细化、专用 `source_attach` 工具/UI、样例靶场回归记录。
+
 ---
 
 ## 工作流 B：SSO 登录接管（人工登录 → Agent 续测）

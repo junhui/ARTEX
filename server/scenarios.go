@@ -105,8 +105,9 @@ func builtinScenarios() []db.TaskTemplateInput {
 			Name:        "Web 应用常规测试",
 			Description: "对目标 Web 应用做常规安全测试",
 			Goal: "对目标 Web 应用进行常规安全测试,覆盖注入、XSS、认证缺陷、越权/IDOR、SSRF、" +
-				"敏感信息泄露、配置不当等常见风险。遵循人在环路审批,高风险/破坏性操作先审批;" +
-				"仅针对已授权目标;以可复现的 PoC 作为漏洞证据(证据即报告)。",
+				"敏感信息泄露、配置不当等常见风险。按 web-app-pentest 总纲的流程推进,按类别用 " +
+				"web-injection / web-xss / web-authz / web-auth / web-ssrf;有源码时先用 code-sast 白盒分析。" +
+				"遵循人在环路审批,高风险/破坏性操作先审批;仅针对已授权目标;以可复现的 PoC 作为漏洞证据(证据即报告)。",
 		},
 		{
 			Name:        "API 接口侦察与测试",
@@ -143,8 +144,9 @@ func builtinScenarios() []db.TaskTemplateInput {
 		{
 			Name:        "白盒源码审计",
 			Description: "结合源码的白盒审计(需提供代码)",
-			Goal: "在提供源码的前提下进行白盒审计:威胁建模、按漏洞类别审查代码路径(注入、越权、认证、SSRF、XSS 等)," +
-				"定位可疑代码点与攻击路径,并在运行环境中以 PoC 验证。无源码时退化为黑盒。",
+			Goal: "在提供源码的前提下进行白盒审计:用 code-sast 做威胁建模与 source→sink 分析," +
+				"按漏洞类别(注入、越权、认证、SSRF、XSS 等)定位可疑代码点与攻击路径," +
+				"再结合 web-app-pentest 在运行环境中以 PoC 验证。无源码时退化为黑盒。",
 		},
 	}
 }
