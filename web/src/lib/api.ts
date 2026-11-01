@@ -52,6 +52,7 @@ import type {
   InterceptDetail,
   InterceptPending,
   InterceptRule,
+  InventoryDomain,
   JudgeConfig,
   JudgeUsage,
   LLMPoolStatus,
@@ -1136,6 +1137,28 @@ export const api = {
       warnings: string[] | null;
       errors: string[] | null;
     }>("/sync/scopesentry/sync", body),
+
+  // ---- InfoSec Portal 域名清单 + 场景化发起测试 ----
+  inventoryDomains: () =>
+    get<{ source: string; domains: InventoryDomain[] }>("/inventory/domains").then((r) => ({
+      source: r.source,
+      domains: arr(r.domains),
+    })),
+  inventorySync: (body: { domains?: string[]; create_company?: boolean }) =>
+    post<{ source: string; synced: Record<string, number>; companies: string[] | null; warnings: string[] | null }>(
+      "/inventory/sync",
+      body,
+    ),
+  scenarios: () => get<{ scenarios: TaskTemplate[] }>("/scenarios").then((r) => arr(r.scenarios)),
+  launchScenario: (body: {
+    target: string;
+    scenario_ids: number[];
+    extra?: string;
+    name?: string;
+    category_id?: number | null;
+    company_ids?: number[];
+    llm_profile_ids?: number[];
+  }) => post<Task>("/scenarios/launch", body),
 
   // ---- skills (文件系统) ----
   skills: () => get<{ skills: SkillItem[] }>("/skills").then((r) => arr(r.skills)),

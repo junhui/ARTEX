@@ -29,6 +29,11 @@
       "insecure": false,
       "timeout_ms": 30000,
       "agents": ["planner", "worker", "auto"],
+      "inventory": {
+        "_comment": "域名清单来源：path 为 Portal 列出 domain inventory 的接口路径（相对 base_url）。留空=使用内置 mock 数据（功能可先用起来）。返回支持数组或 {data|domains|result|items:[...]}，每项字段名宽松匹配(domain/host/name、company/org/owner、ips/ip、tags)。",
+        "path": "",
+        "method": "GET"
+      },
       "tools": [
         {
           "key": "portal_ip_lookup",

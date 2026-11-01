@@ -120,6 +120,49 @@ func buildPortalHTTPExec(base string, cfg config.InfoSecPortal, pt config.InfoSe
 	}
 }
 
+// portalGET issues a GET against the portal (base_url + path) honoring the portal's
+// static headers, proxy, and TLS settings, reusing the http-tool executor. It
+// returns the response body bytes and HTTP status. Used by the inventory provider.
+func (s *Server) portalGET(ctx context.Context, cfg config.InfoSecPortal, method, path string) ([]byte, int, error) {
+	base := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+	if base == "" {
+		return nil, 0, errPortalNotConfigured
+	}
+	if strings.TrimSpace(method) == "" {
+		method = "GET"
+	}
+	exec := httpExec{
+		Method:            strings.ToUpper(method),
+		URL:               base + "/" + strings.TrimLeft(strings.TrimSpace(path), "/"),
+		Headers:           cfg.Headers,
+		TimeoutMs:         cfg.TimeoutMs,
+		Proxy:             cfg.Proxy,
+		UseRecordingProxy: cfg.UseRecordingProxy,
+		Insecure:          cfg.Insecure,
+	}
+	execRaw, _ := json.Marshal(exec)
+	res, err := s.runHTTPTool(ctx, execRaw, map[string]any{}, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	// runHTTPTool returns {"status":int,"body":string}; unwrap it.
+	var wrap struct {
+		Status int    `json:"status"`
+		Body   string `json:"body"`
+	}
+	if jerr := json.Unmarshal([]byte(res.Flatten()), &wrap); jerr != nil {
+		// Not the expected envelope (e.g. transport error text) → surface raw.
+		return []byte(res.Flatten()), 0, nil
+	}
+	return []byte(wrap.Body), wrap.Status, nil
+}
+
+var errPortalNotConfigured = errorString("InfoSec Portal 未配置 base_url")
+
+type errorString string
+
+func (e errorString) Error() string { return string(e) }
+
 // seedInfoSecPortalTools seeds a tools-table row per configured portal tool so each
 // is bindable per-agent and manageable from the UI (like the built-in/traffic host
 // tools). Idempotent (SeedTool DO-NOTHING on conflict) so later UI binding edits

@@ -59,9 +59,21 @@ type InfoSecPortal struct {
 	Insecure          bool                `json:"insecure"`            // skip TLS verification (self-signed internal certs)
 	Proxy             string              `json:"proxy"`               // optional egress proxy for portal calls
 	UseRecordingProxy bool                `json:"use_recording_proxy"` // route through ARTEX's recording proxy (default false)
-	TimeoutMs         int                 `json:"timeout_ms"`          // per-call timeout (default 30000)
-	Agents            []string            `json:"agents"`              // default agent binding for all tools (fallback: worker/planner/auto)
-	Tools             []InfoSecPortalTool `json:"tools"`               // the tools to expose
+	TimeoutMs         int                    `json:"timeout_ms"` // per-call timeout (default 30000)
+	Agents            []string               `json:"agents"`     // default agent binding for all tools (fallback: worker/planner/auto)
+	Tools             []InfoSecPortalTool    `json:"tools"`      // the tools to expose
+	Inventory         InfoSecPortalInventory `json:"inventory"` // optional domain-inventory source
+}
+
+// InfoSecPortalInventory points at the Portal endpoint that lists the domain
+// inventory. When Path is empty, ARTEX falls back to a built-in MOCK provider, so
+// the inventory/scenario features work before the real Portal API exists. The
+// response parser is intentionally lenient (top-level array, or {data|domains|
+// result|items:[...]}, with flexible per-item field names) so the real endpoint
+// slots in by configuration alone.
+type InfoSecPortalInventory struct {
+	Path   string `json:"path"`   // inventory list path (relative to base_url); empty = use mock
+	Method string `json:"method"` // HTTP method (default GET)
 }
 
 // InfoSecPortalConfig resolves the portal config with environment overrides, so

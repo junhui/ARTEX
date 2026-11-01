@@ -223,6 +223,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		seedPrompts(m.pg)          // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
 		s.seedOrchestrationTools()  // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
 		s.seedInfoSecPortalTools() // InfoSec Portal 工具 seed(可选；未配置则 no-op)
+		s.seedBuiltinScenarios()   // 预制测试场景 seed 进任务模板(幂等)
 		if err := s.seedFindingRetester(); err != nil {
 			log.Printf("[retester] seed: %v", err)
 		}
@@ -875,6 +876,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sync/scopesentry/projects", s.syncSSProjects)
 	mux.HandleFunc("GET /api/sync/scopesentry/tasks", s.syncSSTasks)
 	mux.HandleFunc("POST /api/sync/scopesentry/sync", s.syncSSRun)
+
+	// InfoSec Portal 域名清单 + 场景化发起测试(方案 工作流 C 第二阶段)
+	mux.HandleFunc("GET /api/inventory/domains", s.inventoryDomains)
+	mux.HandleFunc("POST /api/inventory/sync", s.inventorySync)
+	mux.HandleFunc("GET /api/scenarios", s.listScenarios)
+	mux.HandleFunc("POST /api/scenarios/launch", s.launchScenario)
 	// Skill CRUD (文件系统)
 	mux.HandleFunc("GET /api/skills", s.fsListSkills)
 	mux.HandleFunc("POST /api/skills", s.fsCreateSkill)
