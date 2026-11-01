@@ -24,6 +24,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import type { InventoryDomain, ScenarioConstraint, TaskTemplate } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 // 域名清单(InfoSec Portal)+ 场景化发起测试(方案 工作流 C 第二阶段)。
 // 未配置真实 Portal 清单接口时,后端回落到内置 mock 数据,功能即刻可用。
@@ -77,20 +78,26 @@ export default function InventoryPage() {
 
   return (
     <div className="p-4 md:p-6">
-      <div className="mb-4 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="font-semibold text-xl">域名清单</h1>
-          <p className="text-muted-foreground text-sm">
-            来自 InfoSec Portal 的域名资产{source ? `（数据源：${source}）` : ""}
-            。点「发起测试」选择场景即可建任务，免去手写任务描述。
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <h1 className="font-semibold text-xl">域名清单</h1>
+            {source ? (
+              <Badge variant="outline" className="font-normal text-muted-foreground text-xs">
+                数据源：{source}
+              </Badge>
+            ) : null}
+          </div>
+          <p className="max-w-2xl text-muted-foreground text-sm">
+            来自 InfoSec Portal 的域名资产。点「发起测试」选择场景即可建任务，免去手写任务描述。
           </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>
-            <RefreshCwIcon className="mr-1 size-4" /> 刷新
+            <RefreshCwIcon className="size-4" /> 刷新
           </Button>
           <Button size="sm" onClick={syncAll} disabled={syncing || domains.length === 0}>
-            <DownloadIcon className="mr-1 size-4" /> {syncing ? "同步中…" : "同步到资产库"}
+            <DownloadIcon className="size-4" /> {syncing ? "同步中…" : "同步到资产库"}
           </Button>
         </div>
       </div>
@@ -128,22 +135,29 @@ export default function InventoryPage() {
               </TableHeader>
               <TableBody>
                 {filtered.map((d) => (
-                  <TableRow key={d.domain}>
+                  <TableRow key={d.domain} className="group">
                     <TableCell className="font-medium">{d.domain}</TableCell>
                     <TableCell className="text-muted-foreground">{d.company ?? "—"}</TableCell>
-                    <TableCell className="text-muted-foreground">{(d.ips ?? []).join(", ") || "—"}</TableCell>
+                    <TableCell className="font-mono text-muted-foreground text-xs">
+                      {(d.ips ?? []).join(", ") || "—"}
+                    </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
                         {(d.tags ?? []).map((t) => (
-                          <Badge key={t} variant="secondary">
+                          <Badge key={t} variant="secondary" className="font-normal">
                             {t}
                           </Badge>
                         ))}
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button size="sm" variant="outline" onClick={() => setLaunchFor(d)}>
-                        <PlayIcon className="mr-1 size-4" /> 发起测试
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="opacity-80 transition group-hover:opacity-100"
+                        onClick={() => setLaunchFor(d)}
+                      >
+                        <PlayIcon className="size-4" /> 发起测试
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -221,45 +235,62 @@ function LaunchDialog({ domain, onClose }: { domain: InventoryDomain | null; onC
     }
   };
 
+  const activeConstraint = constraints.find((c) => c.id === constraint);
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="flex max-h-[88vh] flex-col gap-0 sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>发起测试</DialogTitle>
-          <DialogDescription>目标：{domain?.domain}</DialogDescription>
+          <DialogDescription className="flex items-center gap-1.5">
+            目标
+            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-foreground text-xs">{domain?.domain}</code>
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="-mr-2 flex-1 space-y-5 overflow-y-auto py-4 pr-2">
           <div className="space-y-2">
-            <Label>选择场景（可多选）</Label>
-            <div className="max-h-64 space-y-2 overflow-y-auto rounded-md border p-3">
-              {scenarios.length === 0 ? (
-                <p className="text-muted-foreground text-sm">暂无场景，可在「任务模板」中新增。</p>
-              ) : (
-                scenarios.map((sc) => (
-                  <button
-                    key={sc.id}
-                    type="button"
-                    className="flex w-full cursor-pointer items-start gap-2 text-left"
-                    onClick={() => toggle(sc.id)}
-                  >
-                    <Checkbox checked={selected.has(sc.id)} className="pointer-events-none mt-0.5" tabIndex={-1} />
-                    <span className="leading-tight">
-                      <span className="font-medium text-sm">{sc.name}</span>
-                      {sc.description ? (
-                        <span className="block text-muted-foreground text-xs">{sc.description}</span>
-                      ) : null}
-                    </span>
-                  </button>
-                ))
-              )}
+            <div className="flex items-center justify-between">
+              <Label>选择场景（可多选）</Label>
+              <span className="text-muted-foreground text-xs">已选 {selected.size}</span>
             </div>
+            {scenarios.length === 0 ? (
+              <p className="rounded-md border border-dashed p-4 text-center text-muted-foreground text-sm">
+                暂无场景，可在「任务模板」中新增。
+              </p>
+            ) : (
+              <div className="grid gap-2">
+                {scenarios.map((sc) => {
+                  const on = selected.has(sc.id);
+                  return (
+                    <button
+                      key={sc.id}
+                      type="button"
+                      aria-pressed={on}
+                      className={cn(
+                        "flex w-full cursor-pointer items-start gap-2.5 rounded-lg border p-3 text-left transition",
+                        on ? "border-primary bg-primary/5" : "hover:border-foreground/20 hover:bg-muted/50",
+                      )}
+                      onClick={() => toggle(sc.id)}
+                    >
+                      <Checkbox checked={on} className="pointer-events-none mt-0.5" tabIndex={-1} />
+                      <span className="leading-tight">
+                        <span className="font-medium text-sm">{sc.name}</span>
+                        {sc.description ? (
+                          <span className="mt-0.5 block text-muted-foreground text-xs">{sc.description}</span>
+                        ) : null}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">
             <Label>约束等级（ROE）</Label>
             <Select value={constraint} onValueChange={setConstraint}>
-              <SelectTrigger>
+              <SelectTrigger className="w-full">
                 <SelectValue placeholder="选择约束等级" />
               </SelectTrigger>
               <SelectContent>
@@ -270,20 +301,26 @@ function LaunchDialog({ domain, onClose }: { domain: InventoryDomain | null; onC
                 ))}
               </SelectContent>
             </Select>
-            {constraints.find((c) => c.id === constraint)?.desc ? (
-              <p className="text-muted-foreground text-xs">{constraints.find((c) => c.id === constraint)?.desc}</p>
+            {activeConstraint?.desc ? (
+              <p className="rounded-md bg-muted/50 px-3 py-2 text-muted-foreground text-xs leading-relaxed">
+                {activeConstraint.desc}
+              </p>
             ) : null}
           </div>
 
           <button
             type="button"
-            className="flex w-full cursor-pointer items-start gap-2 text-left"
+            aria-pressed={profile}
+            className={cn(
+              "flex w-full cursor-pointer items-start gap-2.5 rounded-lg border p-3 text-left transition",
+              profile ? "border-primary bg-primary/5" : "hover:border-foreground/20 hover:bg-muted/50",
+            )}
             onClick={() => setProfile((v) => !v)}
           >
             <Checkbox checked={profile} className="pointer-events-none mt-0.5" tabIndex={-1} />
             <span className="leading-tight">
               <span className="font-medium text-sm">测试时顺带采集域名画像</span>
-              <span className="block text-muted-foreground text-xs">
+              <span className="mt-0.5 block text-muted-foreground text-xs">
                 记录这个域名是做什么的、是否 SSO、能看到什么数据，并对关键页面截图
               </span>
             </span>
@@ -311,7 +348,7 @@ function LaunchDialog({ domain, onClose }: { domain: InventoryDomain | null; onC
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="border-t pt-4">
           <Button variant="outline" onClick={onClose} disabled={submitting}>
             取消
           </Button>
