@@ -195,6 +195,16 @@ Portal inventory 同步器 + 页面、场景（任务模板）预制与"多选�
 
 ---
 
+## 增强项(对标 Shannon 补齐)✅
+
+在 C/B/A 之外,又补齐了几项 Shannon 开源版有、ARTEX 原先没有的能力:
+
+- **自动化凭据登录**(`auto_login`):与 B 人工接管互补,配置 `auth_profiles`(表单步骤 + `$username/$password/$totp`,凭据 `${ENV}` 注入),RFC 6238 TOTP,无头 playwright 执行并保存会话态。未配置零影响。
+- **持久化 SAST KB + 结构化 task-formation + reconciliation**:`code-sast` 产出可累积知识库(`sast-kb/`)与结构化利用任务清单;`web-app-pentest` 方法论加入"观察→任务→验证回填→归并去重→一洞一发现"。
+- **PDF 报告 + LLM 执行摘要**:`/api/report/executive`(LLM 合成执行摘要)、`/api/report/html`(自包含可打印 HTML)、`/api/report/pdf`(无头 Chromium 打印);报告页加 HTML/PDF 导出按钮。
+
+> 暂未做(可后续):SARIF 2.1.0 输出/摄入、CI/CD 一次性扫描模式(GitHub Action/GitLab)。
+
 ## 风险与注意
 
 - **授权边界**：全部能力仅用于**已授权**的内部系统测试；保留 ARTEX/Shannon 的"边界与禁止项"，默认开启人在环路审批，破坏性/越权操作需审批。

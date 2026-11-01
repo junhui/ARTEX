@@ -874,6 +874,23 @@ export const api = {
     if (!r.ok) throw new Error(`report: ${r.status}`);
     return r.text();
   },
+  reportBlob: async (kind: "html" | "pdf", task?: string) => {
+    const token = getToken();
+    const r = await fetch(`/api/report/${kind}${tq(task)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!r.ok) {
+      let msg = `report ${kind}: ${r.status}`;
+      try {
+        const j = (await r.json()) as { error?: string };
+        if (j.error) msg = j.error;
+      } catch {
+        /* non-JSON error body */
+      }
+      throw new Error(msg);
+    }
+    return r.blob();
+  },
   chatMentions: (kind: string, query: string, signal?: AbortSignal, cursor = "") =>
     http<{ items: ChatMention[]; next_cursor?: string }>(
       `/chat/mentions?${new URLSearchParams({ kind, q: query, cursor })}`,

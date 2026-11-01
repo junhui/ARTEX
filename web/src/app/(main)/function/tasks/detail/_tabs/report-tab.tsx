@@ -15,6 +15,38 @@ export function ReportTab({ taskId }: { taskId: string }) {
   const [report, setReport] = React.useState<string>("");
   const [loading, setLoading] = React.useState(true);
   const [copied, setCopied] = React.useState(false);
+  const [exporting, setExporting] = React.useState(false);
+
+  async function openHtml() {
+    setExporting(true);
+    try {
+      const blob = await api.reportBlob("html", taskId);
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) {
+      toast.error(`导出 HTML 失败：${(e as Error).message}`);
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function downloadPdf() {
+    setExporting(true);
+    try {
+      const blob = await api.reportBlob("pdf", taskId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `report-${taskId}.pdf`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) {
+      toast.error(`导出 PDF 失败：${(e as Error).message}`);
+    } finally {
+      setExporting(false);
+    }
+  }
 
   React.useEffect(() => {
     let active = true;
@@ -78,9 +110,17 @@ export function ReportTab({ taskId }: { taskId: string }) {
         </CardTitle>
         <div className="flex gap-2">
           {report && (
-            <Button size="sm" variant="outline" onClick={copy}>
-              {copied ? <CheckIcon /> : <CopyIcon />} 复制
-            </Button>
+            <>
+              <Button size="sm" variant="outline" onClick={copy}>
+                {copied ? <CheckIcon /> : <CopyIcon />} 复制
+              </Button>
+              <Button size="sm" variant="outline" onClick={openHtml} disabled={exporting}>
+                <FileTextIcon /> HTML
+              </Button>
+              <Button size="sm" variant="outline" onClick={downloadPdf} disabled={exporting}>
+                <FileTextIcon /> PDF
+              </Button>
+            </>
           )}
         </div>
       </CardHeader>
