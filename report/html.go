@@ -38,9 +38,6 @@ func HTML(in Input, execSummary string) string {
 
 	fmt.Fprintf(&b, "<h1>%s</h1>", html.EscapeString(nz(in.Title, "安全测试报告")))
 	b.WriteString("<div class=\"meta\">")
-	if in.Goal != "" {
-		fmt.Fprintf(&b, "<div><b>目标/范围：</b>%s</div>", html.EscapeString(in.Goal))
-	}
 	fmt.Fprintf(&b, "<div><b>生成时间：</b>%s</div>", in.GeneratedAt.Format(time.RFC3339))
 	b.WriteString("</div>")
 
@@ -64,6 +61,16 @@ func HTML(in Input, execSummary string) string {
 			}
 		}
 		b.WriteString("</div>")
+	}
+
+	if strings.TrimSpace(in.Goal) != "" {
+		b.WriteString("<details class=\"scope\"><summary>测试范围与规则</summary>")
+		for _, para := range strings.Split(strings.TrimSpace(in.Goal), "\n") {
+			if p := strings.TrimSpace(para); p != "" {
+				fmt.Fprintf(&b, "<p>%s</p>", html.EscapeString(p))
+			}
+		}
+		b.WriteString("</details>")
 	}
 
 	if len(in.AssetCounts) > 0 {
@@ -152,7 +159,7 @@ h3{font-size:16px;margin:0 0 6px}
 .chip{border:1px solid var(--line);border-radius:999px;padding:3px 12px;font-size:13px}
 .badge{display:inline-block;color:#fff;border-radius:4px;padding:1px 8px;font-size:12px;margin-right:6px;vertical-align:middle}
 .sev-critical{background:var(--crit)} .sev-high{background:var(--high)} .sev-medium{background:var(--med)} .sev-low{background:var(--low)} .sev-info{background:var(--info)}
-.chip.sev-critical{border-color:var(--crit);color:var(--crit)} .chip.sev-high{border-color:var(--high);color:var(--high)} .chip.sev-medium{border-color:var(--med);color:var(--med)} .chip.sev-low{border-color:var(--low);color:var(--low)}
+.chip.sev-critical,.chip.sev-high,.chip.sev-medium,.chip.sev-low,.chip.sev-info{color:#fff;border-color:transparent}
 .exec p{margin:6px 0}
 .assets{columns:2;font-size:14px;color:var(--muted)}
 .finding{border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin:12px 0;break-inside:avoid}
@@ -160,5 +167,8 @@ h3{font-size:16px;margin:0 0 6px}
 .poc-label{font-size:12px;color:var(--muted);margin-top:8px}
 pre{background:#f6f8fa;border:1px solid var(--line);border-radius:6px;padding:10px;overflow:auto;font-size:12.5px;white-space:pre-wrap;word-break:break-word}
 .muted{color:var(--muted)}
-@media print{body{padding:0}a{color:inherit}}
+.scope{margin:14px 0;border:1px solid var(--line);border-radius:8px;padding:8px 14px;background:#fafafa}
+.scope summary{cursor:pointer;font-weight:500;font-size:14px;color:var(--muted)}
+.scope p{margin:6px 0;font-size:13px;color:var(--muted)}
+@media print{body{padding:0}a{color:inherit}.scope{background:none}.scope[open] summary{margin-bottom:6px}}
 </style>`
