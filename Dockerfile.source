@@ -1,0 +1,52 @@
+# syntax=docker/dockerfile:1
+#
+# 从源码构建 ARTEX(含本分支的全部改动)的多阶段镜像,供本地 `docker compose up --build`
+# 使用,无需在宿主机装 Go / Node。与发布用的 Dockerfile 不同:后者只打包预编译好的二进制,
+# 本文件在容器内从源码完整编译前端 + 后端。
+#
+# 用法(在仓库根目录):
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
+#
+# 运行时层(apt 工具 + Node + Playwright/Chromium + Xvfb/noVNC)与发布镜像保持一致,
+# 这样浏览器自动化 / SSO 登录接管等能力开箱可用。首次构建会拉取浏览器,耗时数分钟。
+
+# ---- 前端:静态导出 ----
+FROM node:20-bookworm AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build:static
+
+# ---- 后端:内嵌前端的单二进制 ----
+FROM golang:1.26-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+COPY --from=web /web/out ./server/webui/dist
+RUN CGO_ENABLED=0 go build -tags embedui -trimpath -o /artex ./cmd/artex
+
+# ---- 运行时(与发布 Dockerfile 的运行层一致)----
+FROM python:3.12-slim-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates ripgrep curl wget vim git jq unzip \
+      dnsutils iputils-ping netcat-openbsd inetutils-telnet whois nmap \
+      xvfb x11vnc novnc websockify chromium \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+RUN npm install -g @playwright/mcp@latest @playwright/cli@latest playwright@latest \
+    && playwright-cli --help \
+    && playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=build /artex /app/artex
+COPY start.sh /app/start.sh
+COPY scripts/browser-session.sh /app/scripts/browser-session.sh
+RUN chmod +x /app/artex /app/start.sh /app/scripts/browser-session.sh
+COPY skills/ /app/skills/
+VOLUME ["/app/data"]
+EXPOSE 8787 8788 6080
+ENTRYPOINT ["/app/start.sh"]
+CMD ["-addr", ":8787", "-proxy", ":8788"]
