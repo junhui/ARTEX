@@ -11,6 +11,8 @@ import {
   FilterXIcon,
   ListChecksIcon,
   Loader2Icon,
+  PinIcon,
+  PinOffIcon,
   RadioTowerIcon,
   SearchIcon,
   Trash2Icon,
@@ -138,6 +140,9 @@ export default function TrafficPage() {
 
   const [traffic, setTraffic] = React.useState<TrafficResp | null>(null);
   const [selected, setSelected] = React.useState<TrafficExchange | null>(null);
+  // locked = 固定查看:Sheet 变为非模态(无遮罩),点列表其它行会更新内容而不关闭,
+  // 便于一边浏览历史一边盯住 request/response 面板。
+  const [locked, setLocked] = React.useState(false);
   const [detail, setDetail] = React.useState<TrafficDetail | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
 
@@ -726,8 +731,22 @@ export default function TrafficPage() {
           onBound={() => setSelectedFlows(new Set())}
         />
       ) : null}
-      <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
-        <SheetContent className="w-full! max-w-none! gap-0 p-0 sm:w-[48rem]! sm:max-w-[48rem]!">
+      <Sheet
+        open={selected !== null}
+        modal={!locked}
+        onOpenChange={(open) => {
+          if (!open && !locked) setSelected(null);
+        }}
+      >
+        <SheetContent
+          className="w-full! max-w-none! gap-0 p-0 sm:w-[48rem]! sm:max-w-[48rem]!"
+          onInteractOutside={(e) => {
+            if (locked) e.preventDefault(); // 固定时点面板外(如列表)不关闭
+          }}
+          onEscapeKeyDown={(e) => {
+            if (locked) e.preventDefault();
+          }}
+        >
           {selected && (
             <>
               <SheetHeader className="border-b px-5 py-4">
@@ -737,6 +756,17 @@ export default function TrafficPage() {
                     {selected.status}
                   </Badge>
                   <span className="ml-auto text-xs text-muted-foreground tabular-nums">{fmtTime(selected.ts)}</span>
+                  <Button
+                    type="button"
+                    variant={locked ? "default" : "ghost"}
+                    size="sm"
+                    className="h-7 gap-1 px-2"
+                    onClick={() => setLocked((v) => !v)}
+                    title={locked ? "取消固定(点面板外即可关闭)" : "固定面板:可继续点击列表切换请求而不关闭"}
+                  >
+                    {locked ? <PinOffIcon className="size-3.5" /> : <PinIcon className="size-3.5" />}
+                    {locked ? "已固定" : "固定"}
+                  </Button>
                 </div>
                 <SheetTitle className="break-all font-mono">{selected.host}</SheetTitle>
                 <SheetDescription className="break-all font-mono">{selected.url}</SheetDescription>
