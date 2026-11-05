@@ -343,7 +343,13 @@ export default function TrafficPage() {
   const rangeEnd = page * size + exchanges.length;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div
+      className={cn(
+        "flex min-h-0 flex-1 flex-col gap-4 transition-[padding] duration-150",
+        // 固定查看时在右侧预留出抽屉的宽度,让页面主体回流到抽屉左侧、互不遮挡
+        locked && selected && "lg:pr-[49rem]",
+      )}
+    >
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">流量</h1>
