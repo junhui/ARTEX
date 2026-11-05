@@ -251,10 +251,13 @@ func (s *Server) launchScenario(w http.ResponseWriter, r *http.Request) {
 	}
 	profile := req.Profile == nil || *req.Profile // default true
 	goal, interceptRules := composeScenarioGoal(req.Target, req.Extra, tmpls, constraint, profile)
-	description := strings.TrimSpace(req.Name)
-	if description == "" {
-		description = "场景测试：" + req.Target
+	// 名称与描述共用:用户填了就用,否则回落「场景测试：<目标>」。此前只给 description
+	// 兜底、Name 直接用空 req.Name,导致从清单发起的任务显示为「未命名」。
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = "场景测试：" + req.Target
 	}
+	description := name
 
 	if len(req.LLMProfileIDs) > 0 {
 		if err := s.validateTaskProfileIDs(req.LLMProfileIDs); err != nil {
@@ -269,7 +272,7 @@ func (s *Server) launchScenario(w http.ResponseWriter, r *http.Request) {
 	}
 
 	t, err := s.m.CreateTaskWithOptions(description, goal, db.TaskCreateOptions{
-		Name:           strings.TrimSpace(req.Name),
+		Name:           name,
 		CategoryID:     req.CategoryID,
 		CompanyIDs:     companyIDs,
 		LLMProfileIDs:  req.LLMProfileIDs,
