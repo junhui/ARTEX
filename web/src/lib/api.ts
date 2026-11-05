@@ -805,6 +805,9 @@ export const api = {
         (opts.order ? `&order=${encodeURIComponent(opts.order)}` : ""),
     ),
   trafficExchange: (id: string) => get<TrafficDetail>(`/traffic/exchange?id=${encodeURIComponent(id)}`),
+  // Per-task 流量 tab: exchanges whose host is within the task's declared scope.
+  taskTraffic: (taskId: string, page = 0, size = 100) =>
+    get<TrafficResp & { hosts?: string[] }>(`/tasks/${encodeURIComponent(taskId)}/traffic?page=${page}&size=${size}`),
   trafficHosts: () => get<{ hosts: TrafficHost[] }>(`/traffic/hosts`),
   trafficDeleteHost: (host: string) => del<{ deleted: number }>(`/traffic?host=${encodeURIComponent(host)}`),
   trafficDeleteHosts: (hosts: string[]) => del<{ deleted: number }>(`/traffic/hosts`, { hosts }),
