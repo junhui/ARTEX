@@ -13,8 +13,9 @@ import { cn } from "@/lib/utils";
 
 // TrafficTab shows the HTTP exchanges recorded for THIS task — the global traffic
 // store filtered to the task's declared scope hosts (GET /api/tasks/{id}/traffic).
-// Burp-style Proxy history: a dense request list on top, request/response side by
-// side below; selecting a row loads its full exchange (GET /api/traffic/exchange).
+// Burp-style Proxy history: a dense request list + a docked request/response viewer.
+// Layout is switchable: 下方分栏 (list over detail) or 右侧固定 (list left, detail
+// pinned right). The detail pane always stays open and updates on row click.
 
 function statusTone(code: number): string {
   if (code >= 500) return "text-red-600 dark:text-red-400";
@@ -45,6 +46,8 @@ function pathOf(url: string): string {
   }
 }
 
+type Layout = "bottom" | "right";
+
 export function TrafficTab({ taskId }: { taskId: string }) {
   const [rows, setRows] = React.useState<TrafficExchange[]>([]);
   const [hosts, setHosts] = React.useState<string[]>([]);
@@ -55,6 +58,7 @@ export function TrafficTab({ taskId }: { taskId: string }) {
   const [detail, setDetail] = React.useState<TrafficDetail | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [side, setSide] = React.useState<"both" | "req" | "resp">("both");
+  const [layout, setLayout] = React.useState<Layout>("bottom");
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -91,104 +95,29 @@ export function TrafficTab({ taskId }: { taskId: string }) {
     const q = filter.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter(
-      (r) =>
-        r.url.toLowerCase().includes(q) ||
-        r.method.toLowerCase().includes(q) ||
-        String(r.status).includes(q),
+      (r) => r.url.toLowerCase().includes(q) || r.method.toLowerCase().includes(q) || String(r.status).includes(q),
     );
   }, [rows, filter]);
 
   const selected = filtered.find((r) => r.id === selectedId) ?? null;
+  const right = layout === "right";
+  // In the narrow right-docked pane, stack request/response; side toggle only in bottom.
+  const twoCol = !right && side === "both";
 
-  return (
-    <div className="flex flex-col gap-3">
-      {/* toolbar */}
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="text-muted-foreground">本任务范围内已录制的 HTTP 流量</span>
-        {hosts.map((h) => (
-          <Badge key={h} variant="outline" className="font-mono text-xs">
-            {h}
-          </Badge>
-        ))}
-        <input
-          className="ml-auto h-8 w-56 rounded-md border bg-background px-2 text-sm outline-none focus:ring-1 focus:ring-ring"
-          placeholder="过滤 URL / 方法 / 状态码"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-        />
-        <Button size="sm" variant="outline" onClick={() => void load()} disabled={loading}>
-          刷新
-        </Button>
-      </div>
-
-      {!enabled && (
-        <div className="rounded-md border border-amber-400/50 bg-amber-400/5 p-3 text-sm">
-          流量录制未开启(系统配置里打开「流量捕获」后,本任务对范围内主机的请求会在此逐条呈现完整请求/响应)。
-        </div>
-      )}
-
-      {/* request list (Burp-style history table) */}
-      <div className="overflow-auto rounded-lg border" style={{ maxHeight: "38vh" }}>
-        <table className="w-full border-collapse text-xs">
-          <thead className="sticky top-0 z-10 bg-muted/80 text-muted-foreground backdrop-blur">
-            <tr>
-              <th className="px-2 py-1.5 text-left font-medium">#</th>
-              <th className="px-2 py-1.5 text-left font-medium">方法</th>
-              <th className="px-2 py-1.5 text-right font-medium">状态</th>
-              <th className="px-2 py-1.5 text-left font-medium">路径</th>
-              <th className="px-2 py-1.5 text-left font-medium">主机</th>
-              <th className="px-2 py-1.5 text-right font-medium">长度</th>
-              <th className="px-2 py-1.5 text-left font-medium">时间</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((ex, i) => (
-              // biome-ignore lint/a11y/useKeyWithClickEvents: row selection; detail pane updates below
-              <tr
-                key={ex.id}
-                onClick={() => void select(ex)}
-                className={cn(
-                  "cursor-pointer border-t hover:bg-muted/40",
-                  ex.id === selectedId && "bg-primary/10 hover:bg-primary/10",
-                )}
-              >
-                <td className="px-2 py-1 text-muted-foreground tabular-nums">{i + 1}</td>
-                <td className="px-2 py-1 font-mono font-medium">{ex.method}</td>
-                <td className={cn("px-2 py-1 text-right font-mono tabular-nums", statusTone(ex.status))}>
-                  {ex.status || "—"}
-                </td>
-                <td className="max-w-[420px] truncate px-2 py-1 font-mono" title={ex.url}>
-                  {pathOf(ex.url)}
-                </td>
-                <td className="truncate px-2 py-1 text-muted-foreground">{ex.host}</td>
-                <td className="px-2 py-1 text-right text-muted-foreground tabular-nums">{fmtLen(ex.resp_len)}</td>
-                <td className="whitespace-nowrap px-2 py-1 text-muted-foreground">{fmtTime(ex.ts)}</td>
-              </tr>
-            ))}
-            {filtered.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-3 py-10 text-center text-muted-foreground">
-                  {loading ? "加载中…" : rows.length === 0 ? "暂无本任务范围内的流量记录" : "无匹配结果"}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* detail: request / response side by side (Burp message editors) */}
+  const detailPane = (
+    <div className={cn("flex flex-col gap-3", right ? "w-[46%] shrink-0" : "")}>
       <div className="flex items-center gap-2">
-        <span className="text-muted-foreground text-xs">
+        <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
           {selected ? (
             <span className="font-mono">
               {selected.method} {selected.url}
             </span>
           ) : (
-            "选择上方一条请求查看完整请求/响应"
+            "选择一条请求查看完整请求/响应"
           )}
         </span>
-        {selected && (
-          <div className="ml-auto flex gap-1">
+        {selected && !right && (
+          <div className="flex gap-1">
             {(["both", "req", "resp"] as const).map((s) => (
               <Button key={s} size="sm" variant={side === s ? "default" : "outline"} onClick={() => setSide(s)}>
                 {s === "both" ? "并排" : s === "req" ? "请求" : "响应"}
@@ -197,14 +126,8 @@ export function TrafficTab({ taskId }: { taskId: string }) {
           </div>
         )}
       </div>
-
-      {selected && (
-        <div
-          className={cn(
-            "grid gap-3",
-            side === "both" ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1",
-          )}
-        >
+      {selected ? (
+        <div className={cn("grid gap-3", twoCol ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1")}>
           {side !== "resp" && (
             <div className="rounded-lg border">
               <div className="border-b bg-muted/50 px-3 py-1.5 font-medium text-xs">请求</div>
@@ -230,7 +153,105 @@ export function TrafficTab({ taskId }: { taskId: string }) {
             </div>
           )}
         </div>
+      ) : (
+        <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground text-sm">
+          {right ? "点击左侧一条请求" : "点击上方一条请求"}
+        </div>
       )}
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* toolbar */}
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-muted-foreground">本任务范围内已录制的 HTTP 流量</span>
+        {hosts.map((h) => (
+          <Badge key={h} variant="outline" className="font-mono text-xs">
+            {h}
+          </Badge>
+        ))}
+        <input
+          className="ml-auto h-8 w-56 rounded-md border bg-background px-2 text-sm outline-none focus:ring-1 focus:ring-ring"
+          placeholder="过滤 URL / 方法 / 状态码"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+        <div className="flex gap-1">
+          <Button size="sm" variant={layout === "bottom" ? "default" : "outline"} onClick={() => setLayout("bottom")}>
+            下方分栏
+          </Button>
+          <Button size="sm" variant={layout === "right" ? "default" : "outline"} onClick={() => setLayout("right")}>
+            右侧固定
+          </Button>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => void load()} disabled={loading}>
+          刷新
+        </Button>
+      </div>
+
+      {!enabled && (
+        <div className="rounded-md border border-amber-400/50 bg-amber-400/5 p-3 text-sm">
+          流量录制未开启(系统配置里打开「流量捕获」后,本任务对范围内主机的请求会在此逐条呈现完整请求/响应)。
+        </div>
+      )}
+
+      <div className={cn(right ? "flex items-start gap-3" : "flex flex-col gap-3")}>
+        {/* request list (Burp-style history table) */}
+        <div
+          className={cn("overflow-auto rounded-lg border", right ? "min-w-0 flex-1" : "")}
+          style={{ maxHeight: right ? "72vh" : "38vh" }}
+        >
+          <table className="w-full border-collapse text-xs">
+            <thead className="sticky top-0 z-10 bg-muted/80 text-muted-foreground backdrop-blur">
+              <tr>
+                <th className="px-2 py-1.5 text-left font-medium">#</th>
+                <th className="px-2 py-1.5 text-left font-medium">方法</th>
+                <th className="px-2 py-1.5 text-right font-medium">状态</th>
+                <th className="px-2 py-1.5 text-left font-medium">路径</th>
+                {!right && <th className="px-2 py-1.5 text-left font-medium">主机</th>}
+                <th className="px-2 py-1.5 text-right font-medium">长度</th>
+                <th className="px-2 py-1.5 text-left font-medium">时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((ex, i) => (
+                // biome-ignore lint/a11y/useKeyWithClickEvents: row selection; the detail pane updates
+                <tr
+                  key={ex.id}
+                  onClick={() => void select(ex)}
+                  className={cn(
+                    "cursor-pointer border-t hover:bg-muted/40",
+                    ex.id === selectedId && "bg-primary/10 hover:bg-primary/10",
+                  )}
+                >
+                  <td className="px-2 py-1 text-muted-foreground tabular-nums">{i + 1}</td>
+                  <td className="px-2 py-1 font-mono font-medium">{ex.method}</td>
+                  <td className={cn("px-2 py-1 text-right font-mono tabular-nums", statusTone(ex.status))}>
+                    {ex.status || "—"}
+                  </td>
+                  <td className="max-w-[420px] truncate px-2 py-1 font-mono" title={ex.url}>
+                    {pathOf(ex.url)}
+                  </td>
+                  {!right && <td className="truncate px-2 py-1 text-muted-foreground">{ex.host}</td>}
+                  <td className="px-2 py-1 text-right text-muted-foreground tabular-nums">{fmtLen(ex.resp_len)}</td>
+                  <td className="whitespace-nowrap px-2 py-1 text-muted-foreground">{fmtTime(ex.ts)}</td>
+                </tr>
+              ))}
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={right ? 6 : 7} className="px-3 py-10 text-center text-muted-foreground">
+                    {loading ? "加载中…" : rows.length === 0 ? "暂无本任务范围内的流量记录" : "无匹配结果"}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* docked request/response viewer (always present; empty state inside) */}
+        {detailPane}
+      </div>
     </div>
   );
 }
