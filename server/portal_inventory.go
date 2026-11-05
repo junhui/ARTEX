@@ -167,7 +167,8 @@ func firstStrSlice(m map[string]any, keys ...string) []string {
 // ---------- HTTP: GET /api/inventory/domains ----------
 
 func (s *Server) inventoryDomains(w http.ResponseWriter, r *http.Request) {
-	if s.pg(w) == nil {
+	pg := s.pg(w)
+	if pg == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
@@ -178,8 +179,176 @@ func (s *Server) inventoryDomains(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 502, "拉取域名清单失败: "+err.Error())
 		return
 	}
+	// Merge locally, manually-added domains (source="manual") into the provider list,
+	// deduped by domain so a manual entry never masks a provider one.
+	if manual, _ := loadManualInventory(pg); len(manual) > 0 {
+		seen := map[string]bool{}
+		for _, d := range domains {
+			seen[strings.ToLower(d.Domain)] = true
+		}
+		for _, m := range manual {
+			if !seen[strings.ToLower(m.Domain)] {
+				domains = append(domains, m)
+			}
+		}
+	}
 	sort.Slice(domains, func(i, j int) bool { return domains[i].Domain < domains[j].Domain })
 	writeJSON(w, 200, map[string]any{"source": p.Name(), "domains": domains})
+}
+
+// ---------- manual inventory (locally added, merged into the listing) ----------
+
+// settingManualInventory is the KV-setting key holding the JSON array of
+// manually-added inventory domains. Stored as a setting so no schema migration is
+// needed; merged into the provider listing by inventoryDomains.
+const settingManualInventory = "inventory_manual_domains"
+
+func loadManualInventory(pg *db.DB) ([]InventoryDomain, error) {
+	raw, ok, err := pg.GetSetting(settingManualInventory)
+	if err != nil || !ok || strings.TrimSpace(raw) == "" {
+		return nil, err
+	}
+	var list []InventoryDomain
+	if json.Unmarshal([]byte(raw), &list) != nil {
+		return nil, nil // corrupt value → treat as empty rather than failing the page
+	}
+	return list, nil
+}
+
+func saveManualInventory(pg *db.DB, list []InventoryDomain) error {
+	b, err := json.Marshal(list)
+	if err != nil {
+		return err
+	}
+	return pg.SetSetting(settingManualInventory, string(b))
+}
+
+// normalizeInventoryDomain extracts a bare host from user input: strips a scheme,
+// any path, and a trailing :port; lowercases. Returns "" if nothing usable remains.
+func normalizeInventoryDomain(in string) string {
+	v := strings.TrimSpace(strings.ToLower(in))
+	if v == "" {
+		return ""
+	}
+	if i := strings.Index(v, "://"); i >= 0 {
+		v = v[i+3:]
+	}
+	if i := strings.IndexAny(v, "/?#"); i >= 0 {
+		v = v[:i]
+	}
+	// strip :port (but keep IPv6 literals intact; inventory domains are plain hosts)
+	if !strings.Contains(v, "]") {
+		if i := strings.LastIndex(v, ":"); i >= 0 {
+			if _, _, ok := splitHostMaybePort(v, i); ok {
+				v = v[:i]
+			}
+		}
+	}
+	return strings.TrimSpace(v)
+}
+
+// splitHostMaybePort reports whether the part after the last colon looks like a port.
+func splitHostMaybePort(v string, i int) (host, port string, isPort bool) {
+	port = v[i+1:]
+	if port == "" {
+		return v[:i], "", false
+	}
+	for _, c := range port {
+		if c < '0' || c > '9' {
+			return v[:i], port, false
+		}
+	}
+	return v[:i], port, true
+}
+
+type inventoryAddReq struct {
+	Domain  string   `json:"domain"`
+	Company string   `json:"company"`
+	IPs     []string `json:"ips"`
+	Tags    []string `json:"tags"`
+	Note    string   `json:"note"`
+}
+
+// inventoryAddDomain adds one manually-entered domain to the local inventory list.
+// POST /api/inventory/domains
+func (s *Server) inventoryAddDomain(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	var req inventoryAddReq
+	if err := decode(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	dom := normalizeInventoryDomain(req.Domain)
+	if dom == "" {
+		writeErr(w, 400, "域名不能为空")
+		return
+	}
+	list, _ := loadManualInventory(pg)
+	for _, d := range list {
+		if strings.EqualFold(d.Domain, dom) {
+			writeErr(w, 409, "该域名已在手动清单中")
+			return
+		}
+	}
+	clean := func(ss []string) []string {
+		out := make([]string, 0, len(ss))
+		for _, s := range ss {
+			if t := strings.TrimSpace(s); t != "" {
+				out = append(out, t)
+			}
+		}
+		return out
+	}
+	list = append(list, InventoryDomain{
+		Domain:  dom,
+		Company: strings.TrimSpace(req.Company),
+		IPs:     clean(req.IPs),
+		Tags:    clean(req.Tags),
+		Note:    strings.TrimSpace(req.Note),
+		Source:  "manual",
+	})
+	if err := saveManualInventory(pg, list); err != nil {
+		writeErr(w, 500, "保存失败: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "domain": dom})
+}
+
+// inventoryDeleteDomain removes one manually-added domain. Only entries added
+// manually can be removed here (provider domains are not stored locally).
+// DELETE /api/inventory/domains?domain=<d>
+func (s *Server) inventoryDeleteDomain(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	dom := normalizeInventoryDomain(r.URL.Query().Get("domain"))
+	if dom == "" {
+		writeErr(w, 400, "domain 不能为空")
+		return
+	}
+	list, _ := loadManualInventory(pg)
+	kept := make([]InventoryDomain, 0, len(list))
+	removed := false
+	for _, d := range list {
+		if strings.EqualFold(d.Domain, dom) {
+			removed = true
+			continue
+		}
+		kept = append(kept, d)
+	}
+	if !removed {
+		writeErr(w, 404, "该域名不在手动清单中(来自同步源的域名无法在此删除)")
+		return
+	}
+	if err := saveManualInventory(pg, kept); err != nil {
+		writeErr(w, 500, "保存失败: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "removed": dom})
 }
 
 // ---------- HTTP: POST /api/inventory/sync ----------

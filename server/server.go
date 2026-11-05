@@ -889,6 +889,8 @@ func (s *Server) Handler() http.Handler {
 
 	// InfoSec Portal 域名清单 + 场景化发起测试(方案 工作流 C 第二阶段)
 	mux.HandleFunc("GET /api/inventory/domains", s.inventoryDomains)
+	mux.HandleFunc("POST /api/inventory/domains", s.inventoryAddDomain)       // 手动添加域名到清单
+	mux.HandleFunc("DELETE /api/inventory/domains", s.inventoryDeleteDomain) // 删除手动添加的域名
 	mux.HandleFunc("POST /api/inventory/sync", s.inventorySync)
 	mux.HandleFunc("GET /api/scenarios", s.listScenarios)
 	mux.HandleFunc("POST /api/scenarios/launch", s.launchScenario)

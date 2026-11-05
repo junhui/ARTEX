@@ -1170,6 +1170,10 @@ export const api = {
       "/inventory/sync",
       body,
     ),
+  inventoryAddDomain: (body: { domain: string; company?: string; ips?: string[]; tags?: string[]; note?: string }) =>
+    post<{ ok: boolean; domain: string }>("/inventory/domains", body),
+  inventoryDeleteDomain: (domain: string) =>
+    del<{ ok: boolean; removed: string }>(`/inventory/domains?domain=${encodeURIComponent(domain)}`),
   scenarios: () =>
     get<{ scenarios: TaskTemplate[]; constraints: ScenarioConstraint[]; default_constraint: string }>(
       "/scenarios",

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { DownloadIcon, PlayIcon, RefreshCwIcon, SearchIcon } from "lucide-react";
+import { DownloadIcon, PlayIcon, PlusIcon, RefreshCwIcon, SearchIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +36,7 @@ export default function InventoryPage() {
   const [search, setSearch] = React.useState("");
   const [syncing, setSyncing] = React.useState(false);
   const [launchFor, setLaunchFor] = React.useState<InventoryDomain | null>(null);
+  const [addOpen, setAddOpen] = React.useState(false);
 
   const load = React.useCallback(() => {
     setLoading(true);
@@ -66,6 +67,16 @@ export default function InventoryPage() {
     }
   };
 
+  const removeManual = async (d: InventoryDomain) => {
+    try {
+      await api.inventoryDeleteDomain(d.domain);
+      toast.success(`已移除：${d.domain}`);
+      load();
+    } catch (e) {
+      toast.error(`移除失败：${(e as Error).message}`);
+    }
+  };
+
   const filtered = domains.filter((d) => {
     if (!search.trim()) return true;
     const q = search.trim().toLowerCase();
@@ -93,6 +104,9 @@ export default function InventoryPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
+            <PlusIcon className="size-4" /> 手动添加
+          </Button>
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>
             <RefreshCwIcon className="size-4" /> 刷新
           </Button>
@@ -151,14 +165,32 @@ export default function InventoryPage() {
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="opacity-80 transition group-hover:opacity-100"
-                        onClick={() => setLaunchFor(d)}
-                      >
-                        <PlayIcon className="size-4" /> 发起测试
-                      </Button>
+                      <div className="flex items-center justify-end gap-2">
+                        {d.source === "manual" ? (
+                          <Badge variant="outline" className="font-normal text-muted-foreground text-xs">
+                            手动
+                          </Badge>
+                        ) : null}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="opacity-80 transition group-hover:opacity-100"
+                          onClick={() => setLaunchFor(d)}
+                        >
+                          <PlayIcon className="size-4" /> 发起测试
+                        </Button>
+                        {d.source === "manual" ? (
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            aria-label="移除手动域名"
+                            className="opacity-80 transition group-hover:opacity-100"
+                            onClick={() => void removeManual(d)}
+                          >
+                            <Trash2Icon className="size-4 text-destructive" />
+                          </Button>
+                        ) : null}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -169,7 +201,109 @@ export default function InventoryPage() {
       </Card>
 
       <LaunchDialog domain={launchFor} onClose={() => setLaunchFor(null)} />
+      <AddDomainDialog open={addOpen} onClose={() => setAddOpen(false)} onAdded={load} />
     </div>
+  );
+}
+
+// AddDomainDialog manually adds a domain to the local inventory list (merged into
+// the provider listing). For environments where the Portal inventory API isn't wired,
+// or to track a target the sync source doesn't know about.
+function AddDomainDialog({ open, onClose, onAdded }: { open: boolean; onClose: () => void; onAdded: () => void }) {
+  const [domain, setDomain] = React.useState("");
+  const [company, setCompany] = React.useState("");
+  const [ips, setIps] = React.useState("");
+  const [tags, setTags] = React.useState("");
+  const [note, setNote] = React.useState("");
+  const [submitting, setSubmitting] = React.useState(false);
+
+  React.useEffect(() => {
+    if (open) {
+      setDomain("");
+      setCompany("");
+      setIps("");
+      setTags("");
+      setNote("");
+    }
+  }, [open]);
+
+  const submit = async () => {
+    if (!domain.trim()) {
+      toast.error("请填写域名");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const splitList = (s: string) =>
+        s
+          .split(/[,\s]+/)
+          .map((x) => x.trim())
+          .filter(Boolean);
+      const r = await api.inventoryAddDomain({
+        domain: domain.trim(),
+        company: company.trim(),
+        ips: splitList(ips),
+        tags: splitList(tags),
+        note: note.trim(),
+      });
+      toast.success(`已添加：${r.domain}`);
+      onAdded();
+      onClose();
+    } catch (e) {
+      toast.error(`添加失败：${(e as Error).message}`);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>手动添加域名</DialogTitle>
+          <DialogDescription>
+            添加到本地清单并与同步来源合并展示；之后可像其它域名一样「发起测试」或「同步到资产库」。
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            <Label htmlFor="add-domain">域名 *</Label>
+            <Input
+              id="add-domain"
+              placeholder="例如 shop.example.com 或 juice-shop:3000"
+              value={domain}
+              onChange={(e) => setDomain(e.target.value)}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="add-company">公司 / 业务线（可选）</Label>
+              <Input id="add-company" value={company} onChange={(e) => setCompany(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="add-ips">IP（可选，逗号/空格分隔）</Label>
+              <Input id="add-ips" placeholder="10.0.0.1, 10.0.0.2" value={ips} onChange={(e) => setIps(e.target.value)} />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="add-tags">标签（可选，逗号/空格分隔）</Label>
+            <Input id="add-tags" placeholder="internal, web" value={tags} onChange={(e) => setTags(e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="add-note">备注（可选）</Label>
+            <Textarea id="add-note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={submitting}>
+            取消
+          </Button>
+          <Button onClick={submit} disabled={submitting}>
+            {submitting ? "添加中…" : "添加"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
