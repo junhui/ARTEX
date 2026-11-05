@@ -143,6 +143,31 @@ export default function TrafficPage() {
   // locked = 固定查看:Sheet 变为非模态(无遮罩),点列表其它行会更新内容而不关闭,
   // 便于一边浏览历史一边盯住 request/response 面板。
   const [locked, setLocked] = React.useState(false);
+  const [drawerW, setDrawerW] = React.useState(768); // 停靠抽屉宽度(px),可拖拽
+  const [isWide, setIsWide] = React.useState(false); // ≥768px:停靠生效(更窄屏回退浮层)
+  const [detailSearch, setDetailSearch] = React.useState(""); // 请求/响应内关键字高亮
+
+  React.useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const sync = () => setIsWide(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const onMove = (ev: PointerEvent) => {
+      const w = Math.min(Math.max(window.innerWidth - ev.clientX, 380), window.innerWidth * 0.92);
+      setDrawerW(w);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
   const [detail, setDetail] = React.useState<TrafficDetail | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
 
@@ -344,11 +369,10 @@ export default function TrafficPage() {
 
   return (
     <div
-      className={cn(
-        "flex min-h-0 flex-1 flex-col gap-4 transition-[padding] duration-150",
-        // 固定查看时在右侧预留出抽屉的宽度,让页面主体回流到抽屉左侧、互不遮挡
-        locked && selected && "lg:pr-[49rem]",
-      )}
+      className="flex min-h-0 flex-1 flex-col gap-4"
+      // 固定查看时在右侧预留出抽屉宽度(随拖拽动态变化),让页面主体回流到抽屉左侧、
+      // 互不遮挡;≥768px 生效,更窄屏回退为浮层抽屉。
+      style={locked && selected && isWide ? { paddingRight: drawerW + 16 } : undefined}
     >
       <div className="flex items-center justify-between gap-4">
         <div>
@@ -745,7 +769,8 @@ export default function TrafficPage() {
         }}
       >
         <SheetContent
-          className="w-full! max-w-none! gap-0 p-0 sm:w-[48rem]! sm:max-w-[48rem]!"
+          className="gap-0 p-0"
+          style={{ width: isWide ? `${drawerW}px` : "100vw", maxWidth: "100vw" }}
           onInteractOutside={(e) => {
             if (locked) e.preventDefault(); // 固定时点面板外(如列表)不关闭
           }}
@@ -753,6 +778,14 @@ export default function TrafficPage() {
             if (locked) e.preventDefault();
           }}
         >
+          {isWide && (
+            // biome-ignore lint/a11y/noStaticElementInteractions: drag handle to resize the drawer
+            <div
+              onPointerDown={startResize}
+              title="拖拽调整宽度"
+              className="absolute inset-y-0 left-0 z-20 w-1.5 cursor-col-resize bg-border/0 transition-colors hover:bg-primary/40"
+            />
+          )}
           {selected && (
             <>
               <SheetHeader className="border-b px-5 py-4">
@@ -777,8 +810,16 @@ export default function TrafficPage() {
                 <SheetTitle className="break-all font-mono">{selected.host}</SheetTitle>
                 <SheetDescription className="break-all font-mono">{selected.url}</SheetDescription>
               </SheetHeader>
+              <div className="mt-3 px-5">
+                <input
+                  className="h-8 w-full rounded-md border bg-background px-2 text-xs outline-none focus:ring-1 focus:ring-ring"
+                  placeholder="在请求/响应中高亮关键字…"
+                  value={detailSearch}
+                  onChange={(e) => setDetailSearch(e.target.value)}
+                />
+              </div>
               <Tabs defaultValue="request" className="min-h-0 flex-1 gap-0">
-                <TabsList className="mx-5 mt-4 grid w-auto grid-cols-2">
+                <TabsList className="mx-5 mt-3 grid w-auto grid-cols-2">
                   <TabsTrigger value="request">请求 Request</TabsTrigger>
                   <TabsTrigger value="response">响应 Response</TabsTrigger>
                 </TabsList>
@@ -789,7 +830,7 @@ export default function TrafficPage() {
                       加载报文…
                     </div>
                   ) : (
-                    <HttpCodeBlock raw={requestWithHost(detail?.req ?? "", selected)} />
+                    <HttpCodeBlock raw={requestWithHost(detail?.req ?? "", selected)} highlight={detailSearch} />
                   )}
                 </TabsContent>
                 <TabsContent value="response" className="min-h-0 overflow-auto">
@@ -799,7 +840,7 @@ export default function TrafficPage() {
                       加载报文…
                     </div>
                   ) : (
-                    <HttpCodeBlock raw={detail?.resp ?? ""} />
+                    <HttpCodeBlock raw={detail?.resp ?? ""} highlight={detailSearch} />
                   )}
                 </TabsContent>
               </Tabs>

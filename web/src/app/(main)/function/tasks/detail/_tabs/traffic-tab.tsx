@@ -59,6 +59,7 @@ export function TrafficTab({ taskId }: { taskId: string }) {
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [side, setSide] = React.useState<"both" | "req" | "resp">("both");
   const [layout, setLayout] = React.useState<Layout>("bottom");
+  const [detailSearch, setDetailSearch] = React.useState(""); // 请求/响应内关键字高亮
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -116,6 +117,14 @@ export function TrafficTab({ taskId }: { taskId: string }) {
             "选择一条请求查看完整请求/响应"
           )}
         </span>
+        {selected && (
+          <input
+            className="h-7 w-44 rounded-md border bg-background px-2 text-xs outline-none focus:ring-1 focus:ring-ring"
+            placeholder="高亮关键字…"
+            value={detailSearch}
+            onChange={(e) => setDetailSearch(e.target.value)}
+          />
+        )}
         {selected && !right && (
           <div className="flex gap-1">
             {(["both", "req", "resp"] as const).map((s) => (
@@ -135,7 +144,7 @@ export function TrafficTab({ taskId }: { taskId: string }) {
                 {detailLoading ? (
                   <div className="py-8 text-center text-muted-foreground text-sm">加载中…</div>
                 ) : (
-                  <HttpCodeBlock raw={detail?.req ?? ""} />
+                  <HttpCodeBlock raw={detail?.req ?? ""} highlight={detailSearch} />
                 )}
               </div>
             </div>
@@ -147,7 +156,7 @@ export function TrafficTab({ taskId }: { taskId: string }) {
                 {detailLoading ? (
                   <div className="py-8 text-center text-muted-foreground text-sm">加载中…</div>
                 ) : (
-                  <HttpCodeBlock raw={detail?.resp ?? ""} />
+                  <HttpCodeBlock raw={detail?.resp ?? ""} highlight={detailSearch} />
                 )}
               </div>
             </div>
@@ -210,6 +219,7 @@ export function TrafficTab({ taskId }: { taskId: string }) {
                 <th className="px-2 py-1.5 text-right font-medium">状态</th>
                 <th className="px-2 py-1.5 text-left font-medium">路径</th>
                 {!right && <th className="px-2 py-1.5 text-left font-medium">主机</th>}
+                {!right && <th className="px-2 py-1.5 text-left font-medium">类型</th>}
                 <th className="px-2 py-1.5 text-right font-medium">长度</th>
                 <th className="px-2 py-1.5 text-left font-medium">时间</th>
               </tr>
@@ -234,13 +244,18 @@ export function TrafficTab({ taskId }: { taskId: string }) {
                     {pathOf(ex.url)}
                   </td>
                   {!right && <td className="truncate px-2 py-1 text-muted-foreground">{ex.host}</td>}
+                  {!right && (
+                    <td className="max-w-[160px] truncate px-2 py-1 text-muted-foreground" title={ex.content_type}>
+                      {ex.content_type || "—"}
+                    </td>
+                  )}
                   <td className="px-2 py-1 text-right text-muted-foreground tabular-nums">{fmtLen(ex.resp_len)}</td>
                   <td className="whitespace-nowrap px-2 py-1 text-muted-foreground">{fmtTime(ex.ts)}</td>
                 </tr>
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={right ? 6 : 7} className="px-3 py-10 text-center text-muted-foreground">
+                  <td colSpan={right ? 6 : 8} className="px-3 py-10 text-center text-muted-foreground">
                     {loading ? "加载中…" : rows.length === 0 ? "暂无本任务范围内的流量记录" : "无匹配结果"}
                   </td>
                 </tr>
