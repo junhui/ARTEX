@@ -52,6 +52,7 @@ import type {
   InterceptDetail,
   InterceptPending,
   InterceptRule,
+  InventoryDomain,
   JudgeConfig,
   JudgeUsage,
   LLMPoolStatus,
@@ -74,6 +75,7 @@ import type {
   SessionTokenUsage,
   Settings,
   Severity,
+  ScenarioConstraint,
   SkillCall,
   SkillItem,
   SSProject,
@@ -803,6 +805,9 @@ export const api = {
         (opts.order ? `&order=${encodeURIComponent(opts.order)}` : ""),
     ),
   trafficExchange: (id: string) => get<TrafficDetail>(`/traffic/exchange?id=${encodeURIComponent(id)}`),
+  // Per-task 流量 tab: exchanges whose host is within the task's declared scope.
+  taskTraffic: (taskId: string, page = 0, size = 100) =>
+    get<TrafficResp & { hosts?: string[] }>(`/tasks/${encodeURIComponent(taskId)}/traffic?page=${page}&size=${size}`),
   trafficHosts: () => get<{ hosts: TrafficHost[] }>(`/traffic/hosts`),
   trafficDeleteHost: (host: string) => del<{ deleted: number }>(`/traffic?host=${encodeURIComponent(host)}`),
   trafficDeleteHosts: (hosts: string[]) => del<{ deleted: number }>(`/traffic/hosts`, { hosts }),
@@ -871,6 +876,23 @@ export const api = {
     });
     if (!r.ok) throw new Error(`report: ${r.status}`);
     return r.text();
+  },
+  reportBlob: async (kind: "html" | "pdf", task?: string) => {
+    const token = getToken();
+    const r = await fetch(`/api/report/${kind}${tq(task)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!r.ok) {
+      let msg = `report ${kind}: ${r.status}`;
+      try {
+        const j = (await r.json()) as { error?: string };
+        if (j.error) msg = j.error;
+      } catch {
+        /* non-JSON error body */
+      }
+      throw new Error(msg);
+    }
+    return r.blob();
   },
   chatMentions: (kind: string, query: string, signal?: AbortSignal, cursor = "") =>
     http<{ items: ChatMention[]; next_cursor?: string }>(
@@ -1136,6 +1158,52 @@ export const api = {
       warnings: string[] | null;
       errors: string[] | null;
     }>("/sync/scopesentry/sync", body),
+
+  // ---- InfoSec Portal 域名清单 + 场景化发起测试 ----
+  inventoryDomains: () =>
+    get<{ source: string; domains: InventoryDomain[] }>("/inventory/domains").then((r) => ({
+      source: r.source,
+      domains: arr(r.domains),
+    })),
+  inventorySync: (body: { domains?: string[]; create_company?: boolean }) =>
+    post<{ source: string; synced: Record<string, number>; companies: string[] | null; warnings: string[] | null }>(
+      "/inventory/sync",
+      body,
+    ),
+  inventoryAddDomain: (body: { domain: string; company?: string; ips?: string[]; tags?: string[]; note?: string }) =>
+    post<{ ok: boolean; domain: string }>("/inventory/domains", body),
+  inventoryDeleteDomain: (domain: string) =>
+    del<{ ok: boolean; removed: string }>(`/inventory/domains?domain=${encodeURIComponent(domain)}`),
+  scenarios: () =>
+    get<{ scenarios: TaskTemplate[]; constraints: ScenarioConstraint[]; default_constraint: string }>(
+      "/scenarios",
+    ).then((r) => ({
+      scenarios: arr(r.scenarios),
+      constraints: arr(r.constraints),
+      defaultConstraint: r.default_constraint,
+    })),
+  launchScenario: (body: {
+    target: string;
+    scenario_ids: number[];
+    constraint?: string;
+    profile?: boolean;
+    extra?: string;
+    name?: string;
+    category_id?: number | null;
+    company_ids?: number[];
+    llm_profile_ids?: number[];
+  }) => post<Task>("/scenarios/launch", body),
+
+  // ---- SSO 登录接管(方案 工作流 B) ----
+  browserLoginPending: () =>
+    get<{
+      enabled: boolean;
+      pending:
+        | { task_id: string; login_url: string; novnc_url: string; created_at: string }[]
+        | null;
+    }>("/browser-login/pending").then((r) => ({ enabled: r.enabled, pending: arr(r.pending) })),
+  browserLoginDone: (taskId: string) => post<{ ok: boolean }>(`/browser-login/${taskId}/done`),
+  browserLoginCancel: (taskId: string) => post<{ ok: boolean }>(`/browser-login/${taskId}/cancel`),
 
   // ---- skills (文件系统) ----
   skills: () => get<{ skills: SkillItem[] }>("/skills").then((r) => arr(r.skills)),

@@ -787,6 +787,9 @@ function ProfileSheet({
 
 export default function LLMPage() {
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
+  // 运行时生效配置(GET /api/llm)。它可能来自环境变量(ARTEX_LLM_*),而非某条已存
+  // profile——那种情况下下面的卡片列表是空的,容易误以为"没配置成功",故单独展示。
+  const [runtime, setRuntime] = React.useState<Awaited<ReturnType<typeof api.getLLM>> | null>(null);
   const [pool, setPool] = React.useState<LLMPoolStatus | null>(null);
   const [poolOpen, setPoolOpen] = React.useState(false);
   // 抽屉的开关和内容分开存：关闭时 editing 保持不变，否则关闭动画期间标题会从
@@ -809,6 +812,11 @@ export default function LLMPage() {
   const load = React.useCallback(async () => {
     try {
       setProfiles(await api.llmProfiles());
+    } catch {
+      /* ignore */
+    }
+    try {
+      setRuntime(await api.getLLM());
     } catch {
       /* ignore */
     }
@@ -883,6 +891,24 @@ export default function LLMPage() {
         </TabsList>
 
         <TabsContent value="profiles" className="mt-4">
+          {runtime?.configured && !profiles.some((p) => p.is_default) && (
+            <div className="mb-4 rounded-lg border border-amber-400/50 bg-amber-400/5 p-3 text-sm">
+              <div className="font-medium">当前生效配置来自环境变量（未保存为模型配置）</div>
+              <div className="mt-1 text-muted-foreground">
+                引擎正在使用{" "}
+                <code className="font-mono text-xs">
+                  {runtime.provider} / {runtime.model}
+                </code>
+                {runtime.base_url ? (
+                  <>
+                    {" @ "}
+                    <code className="font-mono text-xs">{runtime.base_url}</code>
+                  </>
+                ) : null}
+                （来自 <code className="font-mono text-xs">ARTEX_LLM_*</code> 环境变量）。点右上角「新建」把它保存为一条模型配置，才能用于轮询池与按任务绑定。
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {profiles.map((p) => {
               const h = healthOf(p, health.get(p.id));

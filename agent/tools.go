@@ -1049,6 +1049,26 @@ func (t *ToolSet) addOneIntent(it intentItem) (int64, error) {
 		priority = 5
 	}
 	anchors := pidList(it.AssetIDs)
+	// 范围守卫(根治越界资产漏入)：丢弃任何【不在本任务 task_scope 内】的 asset_id。
+	// 资产图是全局共享的,planner(尤其弱模型)可能把一个别的任务的全局资产 id、甚至
+	// 凭空的 id(如 1)挂到意图上——那会让范围外资产漏进本任务的意图/会话/worker。这里用
+	// GetByIDsInScope(本任务及直接来源的范围)过滤,只保留在范围内的;全被丢弃则退化为无
+	// 资产的顶层意图(worker 仍按 summary + 自己 scope 过滤后的 list_assets 推进)。
+	if t.as != nil && t.taskID > 0 && len(anchors) > 0 {
+		if inScope, err := t.as.GetByIDsInScope(t.taskID, anchors); err == nil {
+			allowed := make(map[int64]bool, len(inScope))
+			for _, a := range inScope {
+				allowed[a.ID] = true
+			}
+			kept := make([]int64, 0, len(anchors))
+			for _, id := range anchors {
+				if allowed[id] {
+					kept = append(kept, id)
+				}
+			}
+			anchors = kept
+		}
+	}
 	// 资产拦截：意图绑定的资产若命中系统资产拦截规则，则禁止下发该意图。
 	if t.as != nil && len(anchors) > 0 {
 		hits, err := t.as.CheckAssetsIntercept(t.taskID, anchors)

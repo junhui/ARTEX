@@ -10,13 +10,23 @@ package guard
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/norma/hook"
 )
+
+// ScopeChecker decides whether an outbound request to a host is within a task's
+// declared scope. Implemented by *db.AssetStore (EgressHostAllowed). The hard egress
+// boundary is enforced in the worker's hook chain (server.steerHooks), which reuses
+// EgressHosts / IsLocalHost below; this interface is shared so callers stay db-free.
+type ScopeChecker interface {
+	EgressHostAllowed(taskID int64, host string) (allowed bool, enforced bool, err error)
+}
 
 // AuditEntry records one gated tool call.
 type AuditEntry struct {
@@ -76,6 +86,62 @@ func (g *Guard) preToolUse(ctx context.Context, ev hook.Event) hook.Result {
 	}
 	g.record(ev.ToolName, "allow", "", cmd)
 	return g.applyIntercept(ctx, ev)
+}
+
+// reURL matches http/https URLs embedded in a shell command or tool argument.
+var reURL = regexp.MustCompile(`https?://[^\s"'` + "`" + `<>\\|)]+`)
+
+// EgressHosts extracts the outbound target hostnames implied by a tool call. It
+// covers the two network-egress surfaces agents use: WebFetch's url argument and
+// the http(s) URLs embedded in Bash / interactive-shell commands (curl, wget, …).
+// Bare-host tools (nmap host, nc host port) are not parsed here — a known gap; the
+// common curl/wget/WebFetch paths that caused scope drift are covered. The hard
+// egress boundary (server.steerHooks) calls this, then IsLocalHost + a ScopeChecker.
+func EgressHosts(tool string, input []byte) []string {
+	seen := map[string]bool{}
+	add := func(raw string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return
+		}
+		if u, err := url.Parse(raw); err == nil && u.Hostname() != "" {
+			h := strings.ToLower(u.Hostname())
+			if !seen[h] {
+				seen[h] = true
+			}
+		}
+	}
+	switch tool {
+	case "WebFetch":
+		var in struct {
+			URL string `json:"url"`
+		}
+		_ = json.Unmarshal(input, &in)
+		add(in.URL)
+		// WebFetch inputs seen in the wild also smuggle a curl in a `command` field.
+		for _, m := range reURL.FindAllString(string(input), -1) {
+			add(m)
+		}
+	case "Bash", "shell_open", "shell_send":
+		for _, m := range reURL.FindAllString(string(input), -1) {
+			add(m)
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for h := range seen {
+		out = append(out, h)
+	}
+	return out
+}
+
+// IsLocalHost reports whether a host is loopback / unspecified — local tooling that
+// the scope boundary should never block.
+func IsLocalHost(host string) bool {
+	switch strings.ToLower(strings.Trim(host, "[]")) {
+	case "localhost", "127.0.0.1", "::1", "0.0.0.0", "":
+		return true
+	}
+	return false
 }
 
 // applyIntercept evaluates user-configured intercept rules against the tool call.

@@ -66,6 +66,10 @@ type Server struct {
 	// immediately, so a page reload / proxy timeout can't abort a live run. This
 	// map serializes turns per task — one main-agent run at a time per task, so
 	// concurrent messages don't corrupt the shared exp<id>-main transcript.
+	// browser-login (SSO 登录接管) pending-handoff manager; lazily initialized.
+	blOnce sync.Once
+	blMgr  *browserLoginManager
+
 	chatMu   sync.Mutex
 	chatBusy map[string]bool
 	// chatCancel holds the cancel func for each in-flight conversation run (keyed by
@@ -221,7 +225,11 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		domainReg := buildDomainReg(m.Assets())
 		wireTools(m.pg, domainReg) // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
 		seedPrompts(m.pg)          // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
-		s.seedOrchestrationTools() // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
+		s.seedOrchestrationTools()  // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
+		s.seedInfoSecPortalTools() // InfoSec Portal 工具 seed(可选；未配置则 no-op)
+		s.seedBuiltinScenarios()   // 预制测试场景 seed 进任务模板(幂等)
+		s.seedBrowserLoginTool()   // SSO 登录接管工具 seed(仅开启时；未开启 no-op)
+		s.seedAutoLoginTool()      // 自动化凭据登录工具 seed(仅配置了档案时)
 		if err := s.seedFindingRetester(); err != nil {
 			log.Printf("[retester] seed: %v", err)
 		}
@@ -783,6 +791,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/audit", s.getAudit)
 	mux.HandleFunc("POST /api/gc", s.gc)
+	mux.HandleFunc("GET /api/tasks/{id}/traffic", s.taskTraffic) // per-task 流量 tab (scope-host filtered)
 	mux.HandleFunc("GET /api/traffic", s.getTraffic)
 	mux.HandleFunc("GET /api/traffic/hosts", s.getTrafficHosts)
 	mux.HandleFunc("DELETE /api/traffic", s.deleteTraffic)
@@ -811,6 +820,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/notify/deliveries/{id}/retry", s.notifyRetryDelivery)
 	mux.HandleFunc("POST /api/settings/web-search/test", s.testWebSearch)
 	mux.HandleFunc("GET /api/report", s.getReport)
+	mux.HandleFunc("GET /api/report/executive", s.getReportExecutive)
+	mux.HandleFunc("GET /api/report/html", s.getReportHTML)
+	mux.HandleFunc("GET /api/report/pdf", s.getReportPDF)
 	mux.HandleFunc("GET /api/chat/mentions", s.searchChatMentions)
 	mux.HandleFunc("POST /api/chat", s.chat)
 	mux.HandleFunc("POST /api/chat/upload", s.chatUpload) // 方式1 文件上传:落到会话/任务工作目录 uploads/
@@ -874,6 +886,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sync/scopesentry/projects", s.syncSSProjects)
 	mux.HandleFunc("GET /api/sync/scopesentry/tasks", s.syncSSTasks)
 	mux.HandleFunc("POST /api/sync/scopesentry/sync", s.syncSSRun)
+
+	// InfoSec Portal 域名清单 + 场景化发起测试(方案 工作流 C 第二阶段)
+	mux.HandleFunc("GET /api/inventory/domains", s.inventoryDomains)
+	mux.HandleFunc("POST /api/inventory/domains", s.inventoryAddDomain)       // 手动添加域名到清单
+	mux.HandleFunc("DELETE /api/inventory/domains", s.inventoryDeleteDomain) // 删除手动添加的域名
+	mux.HandleFunc("POST /api/inventory/sync", s.inventorySync)
+	mux.HandleFunc("GET /api/scenarios", s.listScenarios)
+	mux.HandleFunc("POST /api/scenarios/launch", s.launchScenario)
+
+	// SSO 登录接管(方案 工作流 B)
+	mux.HandleFunc("GET /api/browser-login/pending", s.browserLoginPending)
+	mux.HandleFunc("POST /api/browser-login/{id}/done", s.browserLoginDone)
+	mux.HandleFunc("POST /api/browser-login/{id}/cancel", s.browserLoginCancel)
 	// Skill CRUD (文件系统)
 	mux.HandleFunc("GET /api/skills", s.fsListSkills)
 	mux.HandleFunc("POST /api/skills", s.fsCreateSkill)
@@ -1650,18 +1675,32 @@ func schemeForPort(p int) string {
 	return "http"
 }
 
-// llmHost returns the host of the configured LLM endpoint (to keep it out of scope).
-func (s *Server) llmHost() string {
+// llmHostPort returns the host AND port of the configured LLM endpoint, so only
+// the exact gateway endpoint is kept out of scope — not every service that happens
+// to share the host. This matters for Docker deployments where the LLM gateway and
+// a local lab target both live on host.docker.internal but on different ports.
+// Returns ("", 0) when no base URL is configured or it cannot be parsed.
+func (s *Server) llmHostPort() (string, int) {
 	s.cfgMu.Lock()
 	base := s.llmCfg.BaseURL
 	s.cfgMu.Unlock()
 	if base == "" {
-		return ""
+		return "", 0
 	}
-	if u, err := url.Parse(base); err == nil {
-		return strings.ToLower(u.Hostname())
+	u, err := url.Parse(base)
+	if err != nil {
+		return "", 0
 	}
-	return ""
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return "", 0
+	}
+	if ps := u.Port(); ps != "" {
+		if p, err := strconv.Atoi(ps); err == nil {
+			return host, p
+		}
+	}
+	return host, defaultPort(u.Scheme)
 }
 
 func (s *Server) seed(t *Task, text string) {
@@ -1670,9 +1709,12 @@ func (s *Server) seed(t *Task, text string) {
 		log.Printf("[seed] task %s: 未能从 %q 解析出目标 host/IP，不创建站点（请手动配置 scope）", t.ID, text)
 		return
 	}
-	// P0-1 guard: never treat the configured LLM gateway as a target.
-	if gw := s.llmHost(); gw != "" && host == gw {
-		log.Printf("[seed] task %s: 目标 %q 是 LLM 网关，拒绝作为渗透目标", t.ID, host)
+	// P0-1 guard: never treat the configured LLM gateway as a target. Match the
+	// exact host:port — not the host alone — so a different service on the same host
+	// (e.g. a local lab on host.docker.internal:18080 while Ollama runs on :11434)
+	// stays testable instead of being wrongly rejected as the gateway.
+	if gwHost, gwPort := s.llmHostPort(); gwHost != "" && host == gwHost && port == gwPort {
+		log.Printf("[seed] task %s: 目标 %s 与 LLM 网关同 host:port，拒绝作为渗透目标", t.ID, net.JoinHostPort(host, strconv.Itoa(port)))
 		return
 	}
 
@@ -1693,6 +1735,19 @@ func (s *Server) seed(t *Task, text string) {
 		if rootID > 0 {
 			_ = as.SetTaskAssetSource(taskID, rootID, "task", "由任务描述或目标初始化", nil)
 		}
+		// Establish task_scope from the seed target IMMEDIATELY, so the hard egress
+		// boundary is active from the very first worker step. Without this, a
+		// seed_first_intent task runs a worker before the planner's first add_task_scope
+		// round, leaving scope empty → EgressHostAllowed reports enforced=false → the
+		// worker could reach any host during that window. The explicit target IS the
+		// authorization, so record it here (source="manual": user-specified target).
+		kind := "subdomain"
+		if net.ParseIP(host) != nil {
+			kind = "ip"
+		}
+		if _, err := as.AddAgentScope(taskID, kind, host, "任务初始目标", "manual"); err != nil {
+			log.Printf("[seed] task %s: 登记初始范围 %s 失败（不影响任务创建）：%v", t.ID, host, err)
+		}
 	}
 	// anchor the seeded assets to this task's begin root as lineage/provenance
 	// (the asset graph is global and shared; anchoring no longer gates reads).
@@ -1702,6 +1757,12 @@ func (s *Server) seed(t *Task, text string) {
 		}
 	}
 	log.Printf("[seed] task %s: 目标站点 %s", t.ID, u)
+	// 确定性浏览器侦察:对 Web 目标,用真浏览器渲染目标、抓运行时接口与前端路由写进资产图,
+	// 让后续 agent(即便是弱模型)一开始就有真实攻击面可打,而不是只拿到首页空壳。异步、
+	// 尽力而为、带超时,绝不阻塞或拖垮任务创建。
+	if scheme == "http" || scheme == "https" {
+		go s.browserRecon(t, scheme, host, port)
+	}
 	// 不在这里 Notify:首轮是否触发统一由 engine.Run 的 HasActiveIntent 决定(种子意图任务
 	// 跳过首轮)。seed 早于 Run 执行,若在此 Notify 会 buffered 到通道、被 plannerLoop 启动时
 	// 消费掉而绕过 Run 的门控 → 种子任务仍误触发首轮。
@@ -3128,6 +3189,80 @@ func (s *Server) getTraffic(w http.ResponseWriter, r *http.Request) {
 		"page":      page,
 		"size":      size,
 		"exchanges": trafficDTOs(ex),
+	})
+}
+
+// taskTraffic returns the recorded HTTP exchanges whose host falls under THIS task's
+// declared scope — the per-task「流量」tab. Traffic is stored globally and keyed by
+// host (not task), so we filter the global store by the task's scope hosts and merge.
+// Full request/response bodies are fetched lazily by id via the shared
+// /api/traffic/exchange and /api/traffic/blob endpoints (same as the global page).
+// Note: only traffic that traversed the recording proxy is here — the worker's Bash
+// curl/wget does, so it appears; a tool that bypasses the proxy would not.
+func (s *Server) taskTraffic(w http.ResponseWriter, r *http.Request) {
+	tr := s.m.Traffic()
+	if tr == nil {
+		writeJSON(w, 200, map[string]any{"enabled": false, "exchanges": []any{}, "hosts": []string{}})
+		return
+	}
+	taskID, _ := pathInt(r, "id")
+	hosts := []string{}
+	seen := map[string]bool{}
+	if as := s.m.Assets(); as != nil && taskID > 0 {
+		scopes, _ := as.ListTaskScopeWithSources(taskID)
+		for _, sc := range scopes {
+			var h string
+			switch sc.Kind {
+			case "root_domain", "subdomain":
+				h = sc.Domain
+			case "ip", "cidr":
+				h = sc.Net
+				if i := strings.IndexByte(h, '/'); i >= 0 {
+					h = h[:i] // "1.2.3.4/32" → "1.2.3.4"
+				}
+			}
+			if h = strings.TrimSpace(h); h != "" && !seen[h] {
+				seen[h] = true
+				hosts = append(hosts, h)
+			}
+		}
+	}
+	q := r.URL.Query()
+	page := atoiDefault(q.Get("page"), 0)
+	size := atoiDefault(q.Get("size"), 100)
+	merged := map[string]traffic.ExchangeMeta{}
+	for _, h := range hosts {
+		ex, _, _ := tr.Page(traffic.PageQuery{
+			Host: h, Method: q.Get("method"), Query: q.Get("q"),
+			Body: q.Get("body"), Path: q.Get("path"), Status: q.Get("status"),
+			Sort: q.Get("sort"), Order: q.Get("order"),
+		}, 0, 500)
+		for _, e := range ex {
+			merged[e.ID] = e
+		}
+	}
+	all := make([]traffic.ExchangeMeta, 0, len(merged))
+	for _, e := range merged {
+		all = append(all, e)
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].TS > all[j].TS })
+	total := len(all)
+	start := page * size
+	if start > total {
+		start = total
+	}
+	end := start + size
+	if end > total {
+		end = total
+	}
+	writeJSON(w, 200, map[string]any{
+		"enabled":   s.m.TrafficEnabled(),
+		"proxy":     s.m.ProxyAddr(),
+		"hosts":     hosts,
+		"total":     total,
+		"page":      page,
+		"size":      size,
+		"exchanges": trafficDTOs(all[start:end]),
 	})
 }
 

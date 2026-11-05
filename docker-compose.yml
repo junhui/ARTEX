@@ -16,6 +16,10 @@ services:
 
   artex:
     image: tomicdd/artex:${ARTEX_TAG:-latest}
+    # 让容器能访问宿主机上的服务（如本地 Ollama）。Docker Desktop(Win/Mac)自带
+    # host.docker.internal；Linux 需要这行把它映射到宿主网关。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy

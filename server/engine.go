@@ -13,6 +13,7 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/norma/harness"
 	"github.com/Autumn-27/norma/llm"
@@ -539,6 +540,12 @@ type steerHooks struct {
 	limit int
 	// label 形如 "worker-1 · #42"，只用于日志。
 	label string
+	// 硬出站边界：workers 只能访问落在本任务 task_scope 内的主机。出站到范围外主机的
+	// 工具调用(WebFetch / Bash 里的 curl 等)在执行前被拦。taskID<=0 或 scope==nil 关闭。
+	// 放在 worker 的 harness.HookRunner 链里(而非 guard 的 hook.Registry)，因为这里
+	// 的 (prevent=true) 返回约定能确定地阻止工具执行。
+	taskID int64
+	scope  guard.ScopeChecker
 }
 
 // 空转回合(只有思考、既无正文也无工具调用)续跑次数的默认值，与 SDK 空响应重试的
@@ -576,6 +583,28 @@ func isThinkingOnlyTurn(messages []llm.Message) bool {
 }
 
 func (h steerHooks) PreToolUse(ctx context.Context, name string, input []byte) (bool, string, []byte) {
+	// Hard egress boundary (runs first, before steer/intercept): block any outbound
+	// request to a host outside the task's declared scope. Blocking here also means
+	// the out-of-scope host is never fetched → never recorded as an asset → cannot
+	// auto-widen scope. Fail open on a scope-query error (log, don't wedge the agent).
+	if h.scope != nil && h.taskID > 0 {
+		for _, host := range guard.EgressHosts(name, input) {
+			if guard.IsLocalHost(host) {
+				continue
+			}
+			allowed, enforced, err := h.scope.EgressHostAllowed(h.taskID, host)
+			if err != nil {
+				log.Printf("[egress] task %d scope check for %q failed, allowing: %v", h.taskID, host, err)
+				continue
+			}
+			if enforced && !allowed {
+				log.Printf("[egress] task %d 拦截范围外出站 host=%q tool=%s", h.taskID, host, name)
+				return true, "【ARTEX 平台管控·非目标防御】目标主机 " + host +
+					" 不在本任务授权范围（task_scope）内，已阻止越界出站。这是平台授权边界、不是目标防御，请勿改写绕过；" +
+					"如确需测试该主机，请先用 add_task_scope 显式授权后再试。", nil
+			}
+		}
+	}
 	if msg, ok := h.drain(); ok {
 		return true, "【规划者实时纠偏】" + msg +
 			"\n（这是规划者对本意图的即时指令；本次工具调用未执行，请据此调整下一步。若与你当前打算冲突，以此为准。）", nil
@@ -894,6 +923,14 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 			e.cancelExec(t.ID, agent.AbortGoalMet)
 		default:
 			log.Printf("[planner] task %s 规划完成", t.ID)
+			// 可观测性：planner 跑完一轮但 frontier 为空且无在跑意图 → 任务会静默停在
+			// 此处等下一次触发，用户看不到原因（常见于模型没调用"派发意图"的工具）。
+			// 显式打一条 activity + 日志，把"为什么不动了"摆到前台，而不是看起来卡死。
+			if active, aerr := t.Store.HasActiveIntent(); aerr == nil && !active {
+				log.Printf("[planner] task %s 本轮未产出可执行意图（frontier 为空、无在跑意图）——等待下一次触发；若持续如此，通常是当前模型未可靠调用派发意图的工具", t.ID)
+				e.emitActivity(t, db.Activity{Worker: "planner", Kind: "text",
+					Summary: "本轮规划未产出新的可执行意图（frontier 为空、无在跑意图）。任务将停在此处等待下一次触发——若反复如此，通常是当前 LLM 没有可靠地调用「派发意图」工具，建议更换工具调用更强的模型。"})
+			}
 		}
 		e.touch(t.ID)
 	}
@@ -1006,14 +1043,16 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	workCtx = intercept.WithTaskContext(workCtx, t.ID, label, taskEmit)
 	// nudges 有意建在 model_error 重跑循环之外:空转续跑的上限是「这条意图」的总量，
 	// 重跑一轮不该把额度清零重来。
+	wTaskID, _ := strconv.ParseInt(t.ID, 10, 64)
 	hooks := steerHooks{
 		inner:  t.Guard.Hooks(),
 		drain:  func() (string, bool) { return e.drainSteer(iid) },
 		nudges: &atomic.Int64{},
 		limit:  e.emptyTurnNudgeLimit(),
 		label:  label,
+		taskID: wTaskID,
+		scope:  e.m.assets,
 	}
-	wTaskID, _ := strconv.ParseInt(t.ID, 10, 64)
 	e.BeginLLMCall(t.ID)
 	var reason harness.TerminalReason
 	var wrote agent.WriteCounts
@@ -1151,6 +1190,13 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 		}
 	}
 	log.Printf("[worker %s] task %s 意图 #%d 结束: %s (写回 %s)", name, t.ID, intent.ID, state, wrote)
+	// 可观测性：意图正常完成却零写回（无事实/资产/漏洞）通常意味着 worker 其实没真正
+	// 执行侦察就收尾——多见于弱模型没调用执行类工具。把它显式摆到前台，避免"看着跑完了
+	// 其实什么都没做"的静默失败。
+	if state == "done" && wrote.Total() == 0 {
+		e.emitActivity(t, db.Activity{Worker: name, Kind: "text",
+			Summary: "该意图已结束但零写回（无事实/资产/漏洞）。通常表示 worker 未真正执行侦察/利用工具即收尾——多见于当前模型工具调用能力不足，建议更换更强的模型。"})
+	}
 	e.touch(t.ID)
 	t.NotifyDone(intent.ID) // results changed the graph -> wake the planner (with the just-finished intent id)
 	return true
