@@ -39,6 +39,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npm install -g @playwright/mcp@latest @playwright/cli@latest playwright@latest \
     && playwright-cli --help \
     && playwright install --with-deps chromium \
+    # @playwright/cli bundles its own playwright-core pinned to a specific chromium
+    # build (chrome-for-testing); install THAT one too so `playwright-cli open
+    # --browser=chromium` works (the recon skills drive the browser through it).
+    && playwright-cli install-browser chromium \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /artex /app/artex

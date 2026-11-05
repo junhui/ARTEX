@@ -1,6 +1,6 @@
 ---
 name: api-recon
-description: 收集网站API接口时调用该skill。
+description: 系统化侦察一个网站/Web 应用的攻击面——真浏览器渲染 + 静态 JS harvest + 运行时录制,枚举后端 API(path/method/参数/响应)、前端路由、UI 功能触发点。凡是对 Web 目标做接口/资源侦察(尤其 Angular/React/Vue 单页应用)都应调用本 skill,而不是用 curl 猜路径。
 ---
 
 # API Recon（前端接口侦察）
