@@ -14,12 +14,14 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 
 首次构建会装 Chromium 等,耗时数分钟。起来后打开 **http://localhost:8787**,设管理员密码即可玩。
 
-`.env` 至少设置:
+`docker-compose.build.yml` 已**预置 LLM 为本地 Ollama 的 qwen3:14b**,所以 `.env` 最少只需:
 
 ```bash
 POSTGRES_PASSWORD=change-me
-# —— LLM 三选一,见下文 ——
 ```
+
+前提:宿主机已装 Ollama 并 `ollama pull qwen3:14b`(见下 ①)。想换模型/供应商,在 `.env` 里覆盖
+`ARTEX_LLM_BASE_URL` / `ARTEX_LLM_MODEL` / `OPENAI_API_KEY`(见 ②)。
 
 ## 方式 B：不用 Docker（install.sh 本地编译）
 

@@ -15,3 +15,10 @@ services:
       dockerfile: Dockerfile.source
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # 预置为「本地 Ollama qwen3:14b」。宿主机需先 `ollama pull qwen3:14b` 并让 ollama 运行。
+    # 想换模型/供应商时,在 .env 里覆盖这些同名变量即可。
+    environment:
+      ARTEX_LLM_PROVIDER: openai
+      ARTEX_LLM_BASE_URL: ${ARTEX_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      ARTEX_LLM_MODEL: ${ARTEX_LLM_MODEL:-qwen3:14b}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-ollama}
