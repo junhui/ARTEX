@@ -60,6 +60,24 @@ export interface TaskTemplate {
   updated_at: string;
 }
 
+// InfoSec Portal 域名清单条目(方案 工作流 C 第二阶段)。
+export interface InventoryDomain {
+  domain: string;
+  company?: string;
+  ips?: string[];
+  tags?: string[];
+  note?: string;
+  source?: string;
+}
+
+// 测试场景的约束等级(ROE)。
+export interface ScenarioConstraint {
+  id: string;
+  name: string;
+  desc: string;
+  roe: string;
+}
+
 export interface DeleteTaskOptions {
   delete_assets: boolean;
   delete_traffic: boolean;

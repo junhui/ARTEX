@@ -49,6 +49,7 @@ import { OverviewTab } from "./_tabs/overview-tab";
 import { ReportTab } from "./_tabs/report-tab";
 import { RetestsTab } from "./_tabs/retests-tab";
 import { SessionsTab } from "./_tabs/sessions-tab";
+import { TrafficTab } from "./_tabs/traffic-tab";
 
 const TABS = [
   { value: "sessions", label: "会话" },
@@ -60,6 +61,7 @@ const TABS = [
   { value: "assets", label: "测试资产" },
   { value: "coverage", label: "资产覆盖图" },
   { value: "intercept", label: "拦截审批" },
+  { value: "traffic", label: "流量" },
   { value: "report", label: "报告" },
 ];
 
@@ -443,6 +445,9 @@ function TaskDetailInner() {
         </TabsContent>
         <TabsContent value="intercept" className="mt-0">
           <InterceptTab taskId={id} />
+        </TabsContent>
+        <TabsContent value="traffic" className="mt-0">
+          <TrafficTab taskId={id} />
         </TabsContent>
         <TabsContent value="report" className="mt-0">
           <ReportTab taskId={id} />

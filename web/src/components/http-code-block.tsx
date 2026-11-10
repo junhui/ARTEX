@@ -111,7 +111,34 @@ function HighlightedBody({ body, format }: { body: string; format: BodyFormat })
   return body;
 }
 
-export function HttpCodeBlock({ raw }: { raw: string }) {
+// HighlightText wraps case-insensitive matches of `term` in <mark>. Used for the
+// request/response keyword search; a matching line renders as plain text so the
+// highlight is unambiguous (non-matching lines keep their syntax colors).
+function HighlightText({ text, term }: { text: string; term: string }) {
+  if (!term) return <>{text}</>;
+  const lower = text.toLowerCase();
+  const t = term.toLowerCase();
+  const out: React.ReactNode[] = [];
+  let i = 0;
+  let key = 0;
+  while (i < text.length) {
+    const idx = lower.indexOf(t, i);
+    if (idx < 0) {
+      out.push(text.slice(i));
+      break;
+    }
+    if (idx > i) out.push(text.slice(i, idx));
+    out.push(
+      <mark key={`m${key++}`} className="rounded-[2px] bg-yellow-300/70 text-black dark:bg-yellow-500/50 dark:text-white">
+        {text.slice(idx, idx + term.length)}
+      </mark>,
+    );
+    i = idx + term.length;
+  }
+  return <>{out}</>;
+}
+
+export function HttpCodeBlock({ raw, highlight }: { raw: string; highlight?: string }) {
   const [wrapLines, setWrapLines] = React.useState(true);
   const [copied, setCopied] = React.useState(false);
   const value = raw || "（空）";
@@ -136,6 +163,10 @@ export function HttpCodeBlock({ raw }: { raw: string }) {
   };
 
   const renderLine = (line: string, index: number) => {
+    const hl = highlight?.trim();
+    if (hl && index !== separator && line.toLowerCase().includes(hl.toLowerCase())) {
+      return <HighlightText text={line} term={hl} />;
+    }
     if (index === 0) return <StartLine line={line} />;
     if (separator < 0 || index < separator) return <HeaderLine line={line} />;
     if (index === separator) return null;

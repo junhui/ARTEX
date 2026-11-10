@@ -6,6 +6,9 @@ allowed-tools: Bash(playwright-cli:*) Bash(npx:*) Bash(npm:*)
 
 # Browser Automation with playwright-cli
 
+> **本环境浏览器**:未安装 Google Chrome channel(默认 `open` 会报找不到 `/opt/google/chrome/chrome`)。
+> 一律用 **`playwright-cli open --browser=chromium <url>`**(镜像已预装对应 chromium)。其余命令不变。
+
 ## Quick start
 
 ```bash

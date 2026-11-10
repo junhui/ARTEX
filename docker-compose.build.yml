@@ -1,0 +1,24 @@
+# 本地从源码构建覆盖层(配合 docker-compose.yml 使用)。
+#
+# 发布用的 docker-compose.yml 拉取上游预编译镜像(tomicdd/artex),不含本分支改动。
+# 叠加本文件即改为“从当前源码构建”,无需在宿主机装 Go / Node:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
+#
+# extra_hosts 让容器内可用 host.docker.internal 访问宿主机上的本地模型
+# (如 Ollama 的 http://host.docker.internal:11434/v1);Docker Desktop 自带该主机名,
+# Linux 下靠这里的 host-gateway 映射。
+services:
+  artex:
+    build:
+      context: .
+      dockerfile: Dockerfile.source
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # 预置为「本地 Ollama qwen3:14b」。宿主机需先 `ollama pull qwen3:14b` 并让 ollama 运行。
+    # 想换模型/供应商时,在 .env 里覆盖这些同名变量即可。
+    environment:
+      ARTEX_LLM_PROVIDER: openai
+      ARTEX_LLM_BASE_URL: ${ARTEX_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      ARTEX_LLM_MODEL: ${ARTEX_LLM_MODEL:-qwen3:14b}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-ollama}

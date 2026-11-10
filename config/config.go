@@ -26,8 +26,172 @@ type Database struct {
 
 // Config is the on-disk config file shape.
 type Config struct {
-	Database Database `json:"database"`
-	SkillDir string   `json:"skill_dir"`
+	Database      Database      `json:"database"`
+	SkillDir      string        `json:"skill_dir"`
+	InfoSecPortal InfoSecPortal  `json:"infosec_portal"`
+	BrowserLogin  BrowserLogin   `json:"browser_login"`
+	AuthProfiles  []AuthProfile  `json:"auth_profiles"`
+}
+
+// AuthStep is one step of an automated login flow.
+type AuthStep struct {
+	Action   string `json:"action"`   // goto | fill | click | press | wait
+	Selector string `json:"selector"` // CSS selector (fill/click)
+	Value    string `json:"value"`    // fill text / key / url / ms; supports $username $password $totp
+}
+
+// AuthProfile is an OPTIONAL automated credentialed login flow for non-interactive
+// (e.g. CI) runs — the counterpart to the human-in-the-loop browser_login. When no
+// profiles are configured, the auto_login tool is not offered. Credentials may be
+// given as ${ENV_VAR} so secrets stay out of the file.
+type AuthProfile struct {
+	Name               string     `json:"name"`
+	Match              string     `json:"match"`       // substring matched against the target host/URL to pick this profile
+	LoginType          string     `json:"login_type"`  // "form" (default)
+	LoginURL           string     `json:"login_url"`
+	Username           string     `json:"username"`    // supports ${ENV}
+	Password           string     `json:"password"`    // supports ${ENV}
+	TOTPSecret         string     `json:"totp_secret"` // base32 secret for $totp; supports ${ENV}
+	Steps              []AuthStep `json:"steps"`
+	SuccessURLContains string     `json:"success_url_contains"`
+	SuccessSelector    string     `json:"success_selector"`
+}
+
+// expandEnv replaces a whole-string ${VAR} reference with the env var's value.
+// A plain value (no ${...}) is returned unchanged.
+func expandEnv(v string) string {
+	v = strings.TrimSpace(v)
+	if strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}") {
+		return os.Getenv(v[2 : len(v)-1])
+	}
+	return v
+}
+
+// AuthProfilesConfig returns the configured login profiles with ${ENV} credentials
+// expanded. Empty when the feature is not configured.
+func AuthProfilesConfig() []AuthProfile {
+	ps := Load().AuthProfiles
+	for i := range ps {
+		ps[i].Username = expandEnv(ps[i].Username)
+		ps[i].Password = expandEnv(ps[i].Password)
+		ps[i].TOTPSecret = expandEnv(ps[i].TOTPSecret)
+	}
+	return ps
+}
+
+// BrowserLogin configures the OPTIONAL human-in-the-loop SSO login handoff: a
+// human completes SSO (incl. MFA) in a server-side headful browser viewed over
+// noVNC, then the agent reuses the authenticated session. When Enabled is false
+// (default) the feature is entirely off — the browser_login tool is not offered
+// and no VNC/Chromium processes are expected, so ARTEX is unaffected.
+//
+// The VNC stack (Xvfb + x11vnc + noVNC) and the headful Chromium (with the CDP
+// debugging port) are started by the container/start script when enabled; ARTEX
+// only drives that Chromium over CDP. See design/sso-login.md.
+type BrowserLogin struct {
+	Enabled      bool   `json:"enabled"`        // master switch (default off)
+	NoVNCURL     string `json:"novnc_url"`      // operator-facing noVNC page URL (e.g. http://host:6080/vnc.html?autoconnect=1)
+	CDPEndpoint  string `json:"cdp_endpoint"`   // Chromium CDP endpoint ARTEX drives (default http://127.0.0.1:9222)
+	NodeHelper   string `json:"node_helper"`    // path to the CDP helper script (default skills/authenticated-session/scripts/cdp-helper.js)
+	TimeoutSec   int    `json:"timeout_sec"`    // max seconds to wait for the human (default 600)
+	StateSubpath string `json:"state_subpath"`  // storage-state filename under the task dir (default auth-state.json)
+}
+
+// BrowserLoginConfig resolves the browser-login config with environment overrides:
+//
+//	env ARTEX_BROWSER_LOGIN=1          force-enables the feature
+//	env ARTEX_BROWSER_LOGIN_NOVNC_URL  overrides the operator-facing noVNC URL
+//	env ARTEX_BROWSER_LOGIN_CDP        overrides the CDP endpoint
+func BrowserLoginConfig() BrowserLogin {
+	b := Load().BrowserLogin
+	if v := strings.TrimSpace(os.Getenv("ARTEX_BROWSER_LOGIN")); v == "1" || strings.EqualFold(v, "true") {
+		b.Enabled = true
+	}
+	if v := strings.TrimSpace(os.Getenv("ARTEX_BROWSER_LOGIN_NOVNC_URL")); v != "" {
+		b.NoVNCURL = v
+	}
+	if v := strings.TrimSpace(os.Getenv("ARTEX_BROWSER_LOGIN_CDP")); v != "" {
+		b.CDPEndpoint = v
+	}
+	if strings.TrimSpace(b.CDPEndpoint) == "" {
+		b.CDPEndpoint = "http://127.0.0.1:9222"
+	}
+	if strings.TrimSpace(b.NoVNCURL) == "" {
+		b.NoVNCURL = "/novnc/vnc.html?autoconnect=1&resize=remote"
+	}
+	if b.TimeoutSec <= 0 {
+		b.TimeoutSec = 600
+	}
+	if strings.TrimSpace(b.StateSubpath) == "" {
+		b.StateSubpath = "auth-state.json"
+	}
+	return b
+}
+
+// InfoSecPortalTool is one HTTP-backed tool the InfoSec Portal exposes to agents
+// (e.g. "look up an IP", "look up an asset"). Each becomes a callable agent tool
+// that issues one HTTP request to the portal. Path/Query/Headers/Body may embed
+// {param} placeholders that are filled from the tool call's arguments at runtime.
+type InfoSecPortalTool struct {
+	Key         string            `json:"key"`         // tool name (lowercase, [a-z0-9_]); must be unique
+	Description string            `json:"description"` // shown to the model: what it does + when to use it
+	Method      string            `json:"method"`      // HTTP method (default GET)
+	Path        string            `json:"path"`        // appended to base_url; may contain {param}
+	Query       map[string]string `json:"query"`       // query params; values may contain {param}
+	Headers     map[string]string `json:"headers"`     // per-tool headers; values may contain {param}
+	Body        string            `json:"body"`        // request body; may contain {param}
+	Schema      json.RawMessage   `json:"schema"`      // JSON Schema for the tool's arguments
+	Agents      []string          `json:"agents"`      // per-tool binding override (falls back to portal-level agents)
+	Enabled     *bool             `json:"enabled"`     // nil/true = on; false = skip this tool
+}
+
+// InfoSecPortal is the OPTIONAL internal InfoSec Portal integration. It is purely
+// additive: when base_url is empty (the section omitted), NO portal tools are
+// registered and ARTEX behaves exactly as if the feature did not exist — the only
+// effect of leaving it unconfigured is that those lookup tools are unavailable.
+// ARTEX stays an independent project; the portal is referenced over plain HTTP.
+type InfoSecPortal struct {
+	BaseURL           string              `json:"base_url"`            // e.g. https://infosec.internal (empty = feature off)
+	Headers           map[string]string   `json:"headers"`             // static headers on every call (e.g. auth)
+	Insecure          bool                `json:"insecure"`            // skip TLS verification (self-signed internal certs)
+	Proxy             string              `json:"proxy"`               // optional egress proxy for portal calls
+	UseRecordingProxy bool                `json:"use_recording_proxy"` // route through ARTEX's recording proxy (default false)
+	TimeoutMs         int                    `json:"timeout_ms"` // per-call timeout (default 30000)
+	Agents            []string               `json:"agents"`     // default agent binding for all tools (fallback: worker/planner/auto)
+	Tools             []InfoSecPortalTool    `json:"tools"`      // the tools to expose
+	Inventory         InfoSecPortalInventory `json:"inventory"` // optional domain-inventory source
+}
+
+// InfoSecPortalInventory points at the Portal endpoint that lists the domain
+// inventory. When Path is empty, ARTEX falls back to a built-in MOCK provider, so
+// the inventory/scenario features work before the real Portal API exists. The
+// response parser is intentionally lenient (top-level array, or {data|domains|
+// result|items:[...]}, with flexible per-item field names) so the real endpoint
+// slots in by configuration alone.
+type InfoSecPortalInventory struct {
+	Path   string `json:"path"`   // inventory list path (relative to base_url); empty = use mock
+	Method string `json:"method"` // HTTP method (default GET)
+}
+
+// InfoSecPortalConfig resolves the portal config with environment overrides, so
+// secrets (tokens) and the base URL can be injected without editing the file:
+//
+//	env ARTEX_INFOSEC_PORTAL_BASE_URL  overrides base_url
+//	env ARTEX_INFOSEC_PORTAL_TOKEN     sets the "Authorization: Bearer <token>" header
+//
+// A missing config file or absent section yields a zero value (feature off).
+func InfoSecPortalConfig() InfoSecPortal {
+	p := Load().InfoSecPortal
+	if v := strings.TrimSpace(os.Getenv("ARTEX_INFOSEC_PORTAL_BASE_URL")); v != "" {
+		p.BaseURL = v
+	}
+	if tok := strings.TrimSpace(os.Getenv("ARTEX_INFOSEC_PORTAL_TOKEN")); tok != "" {
+		if p.Headers == nil {
+			p.Headers = map[string]string{}
+		}
+		p.Headers["Authorization"] = "Bearer " + tok
+	}
+	return p
 }
 
 // BaseDir is the directory that anchors all runtime artifacts (config.json and

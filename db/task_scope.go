@@ -109,6 +109,24 @@ func (s *AssetStore) AddAutoScope(taskID int64, assetType, domain, rawURL, ip st
 	if taskID <= 0 {
 		return nil
 	}
+	// Defense in depth for the egress boundary: auto-scope must never INTRODUCE a
+	// brand-new host authorization. If the task already has host-based scope and this
+	// asset's host falls outside it, skip — an agent widens scope deliberately via
+	// add_task_scope, never by merely touching/registering a host (e.g. insert_assets).
+	// When the task has no host-based scope yet, EgressHostAllowed reports enforced=false
+	// and this is a no-op, so initial scope establishment is unaffected.
+	host := domain
+	if host == "" && rawURL != "" {
+		host, _, _ = parseURL(normalizeURL(rawURL))
+	}
+	if host == "" {
+		host = ip
+	}
+	if host != "" {
+		if allowed, enforced, err := s.EgressHostAllowed(taskID, host); err == nil && enforced && !allowed {
+			return nil
+		}
+	}
 	switch assetType {
 	case "root_domain":
 		if d := DomainKey(domain); d != "" {
@@ -137,6 +155,52 @@ func (s *AssetStore) AddAutoScope(taskID int64, assetType, domain, rawURL, ip st
 		}
 	}
 	return nil
+}
+
+// EgressHostAllowed reports whether an outbound request to host is permitted by
+// taskID's declared scope — the hard egress boundary enforced by the Guard.
+//
+//   - enforced=false → the task has NO host-based scope (root_domain/subdomain/ip/cidr),
+//     so a host cannot be judged and MUST NOT be blocked (allowed=true). This keeps
+//     brand-new or company/ICP-only tasks working instead of wedging all egress.
+//   - enforced=true  → at least one host-based scope row exists; allowed=true only
+//     when host matches one (root_domain suffix, subdomain exact, or ip/cidr contains).
+//
+// Membership mirrors scopeTargetCTE. company/icp rows define no host and are ignored.
+// On a query error it fails OPEN (allowed=true, enforced=false, err set) so a DB hiccup
+// never silently halts the agent; the caller logs the error. taskID<=0 → not enforced.
+func (s *AssetStore) EgressHostAllowed(taskID int64, host string) (allowed bool, enforced bool, err error) {
+	if taskID <= 0 {
+		return true, false, nil
+	}
+	h := DomainKey(stripHostPort(strings.TrimSpace(host)))
+	if h == "" {
+		return true, false, nil
+	}
+	const q = `
+WITH context_tasks AS (
+  SELECT t.id AS task_id FROM tasks t WHERE t.id=$1 AND t.deleted_at IS NULL
+  UNION ALL
+  SELECT source.id FROM task_relations relation
+  JOIN tasks source ON source.id=relation.source_task_id AND source.deleted_at IS NULL
+  WHERE relation.task_id=$1
+)
+SELECT
+  COUNT(*) FILTER (WHERE ts.kind IN ('root_domain','subdomain','ip','cidr')) AS host_rows,
+  COUNT(*) FILTER (WHERE
+       (ts.kind='root_domain'   AND ($2 = ts.domain OR $2 LIKE '%.'||ts.domain))
+    OR (ts.kind='subdomain'     AND $2 = ts.domain)
+    OR (ts.kind IN ('ip','cidr') AND ts.net >>= try_inet($2))
+  ) AS match_rows
+FROM task_scope ts JOIN context_tasks ctx ON ctx.task_id=ts.task_id`
+	var hostRows, matchRows int
+	if err = s.db.QueryRow(q, taskID, h).Scan(&hostRows, &matchRows); err != nil {
+		return true, false, err
+	}
+	if hostRows == 0 {
+		return true, false, nil
+	}
+	return matchRows > 0, true, nil
 }
 
 // AddAgentScope parses a (kind,value) pair and records it as task scope.
